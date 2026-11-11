@@ -144,7 +144,7 @@ details.cfg[open] summary{margin-bottom:12px}
   .att-page img{max-width:100%;max-height:100%;object-fit:contain}
   @page{size:A4;margin:0}
   body{background:#fff;padding:0}
-  .wrap>header,.tabs,.ro-banner,.col:not(.preview-panel),#view-admin,#zoomHint,.envio,#histBox,.fech,.panel-head,.dl-row,#syncMsg,.backup{display:none!important}
+  .wrap>header,.atraso,.tabs,.ro-banner,.col:not(.preview-panel),#view-admin,#zoomHint,.envio,#histBox,.fech,.panel-head,.dl-row,#syncMsg,.backup{display:none!important}
   .wrap,.grid,.col,.panel{display:block;border:none;padding:0;margin:0;max-width:none;background:#fff;position:static}
   .sheet-wrap{height:auto!important;overflow:visible!important}
   .sheet-wrap .sheet,.sheet{transform:none!important;box-shadow:none;border:none;border-radius:0;width:210mm!important;height:297mm;aspect-ratio:auto;padding:16mm 16mm 18mm;font-size:11pt}
@@ -194,6 +194,13 @@ select.papel{width:auto;padding:4px 8px;font-size:.85rem} .tag.off{color:var(--d
 .alerta{border:1px solid var(--danger);color:var(--danger);border-radius:10px;padding:10px 12px;font-size:.9rem;font-weight:600}
 .hist{margin:0;padding-left:18px;font-size:.85rem;display:flex;flex-direction:column;gap:4px}
 .hist .m{display:block;color:var(--muted);white-space:pre-wrap}
+/* aviso de relatório atrasado: fundo vermelho piscando (sem piscar para quem desativou animações) */
+.atraso{background:#c62828;color:#fff;border-radius:12px;padding:12px 16px;display:flex;flex-direction:column;gap:8px;animation:pisca 1.2s ease-in-out infinite}
+.atraso .linha{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.atraso b{font-family:var(--f-display);font-size:1.1rem;letter-spacing:.01em}
+.atraso button{background:#fff;color:#c62828;border-color:#fff;font-weight:700}
+@keyframes pisca{0%,100%{background:#c62828}50%{background:#ef5350}}
+@media (prefers-reduced-motion:reduce){.atraso{animation:none}}
 .badge{display:inline-block;background:var(--danger);color:#fff;border-radius:99px;padding:0 7px;font-size:.72rem;line-height:1.5;margin-left:4px;vertical-align:middle}
 .pend-row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)}
 .pend-row:first-child{border-top:none}
@@ -308,6 +315,8 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
     <div class="userbox"><div class="who"><b id="whoName">—</b><span id="whoEmail"></span></div><button data-sair>Sair</button></div>
   </header>
 
+  <div class="atraso" id="atrasoBar" role="alert" hidden></div>
+
   <nav class="tabs" id="tabs" role="tablist" hidden>
     <button role="tab" id="tabMine" aria-selected="true">Meus lançamentos</button>
     <button role="tab" id="tabAdmin" aria-selected="false"><span id="tabAdminTxt">Administração</span> <span class="badge" id="admBadge" hidden></span></button>
@@ -402,7 +411,7 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
           <span class="status" id="pdfMsg"></span>
         </div>
         <div class="envio" id="envioBox" hidden>
-          <div class="dl-row"><button class="primary" id="btnEnviar">Enviar ao administrador</button><span class="hint" id="envHint">Quando terminar os lançamentos deste período, envie para aprovação.</span></div>
+          <div class="dl-row"><button class="primary" id="btnEnviar">Enviar ao aprovador</button><span class="hint" id="envHint">Quando terminar os lançamentos deste período, envie para aprovação.</span></div>
           <div class="confirm-box" id="envConfirm" hidden>
             <p id="envTxt"></p>
             <div class="dl-row"><button class="primary" id="btnEnvSim">Sim, enviar</button><button id="btnEnvNao">Cancelar</button></div>

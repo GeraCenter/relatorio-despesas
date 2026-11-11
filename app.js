@@ -1,6 +1,6 @@
 (function () {
 'use strict';
-const APPVER = '2.6.0';
+const APPVER = '2.7.0';
 const $ = id => document.getElementById(id);
 const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -183,6 +183,7 @@ async function entrarNoSistema(u) {
   abrirMeus();
   show('view-app');
   if (isAprov) atualizarPendencias();
+  verificarAtrasos();
   if (novoPerfil || !myProfile.nome) { $('cfg').open = true; $('pMsg').textContent = 'Primeiro acesso: preencha seus dados e clique em Salvar dados. Eles aparecem no relatório.'; }
 }
 
@@ -215,13 +216,13 @@ function assinar() {
     else status(doCache ? 'Sem conexão: mostrando o que está guardado no aparelho.' : 'Tudo sincronizado.', doCache);
   }, e => status('Não consegui carregar os lançamentos: ' + errMsg(e), true));
   fech = null; const k = curKey, uid = viewUid;
-  unsubFech = Store.ouvirFechamento(uid, k, f => { if (k !== curKey || uid !== viewUid) return; fech = f; if (travado() && editingId) resetForm(); render(); }, () => {});
+  unsubFech = Store.ouvirFechamento(uid, k, f => { if (k !== curKey || uid !== viewUid) return; fech = f; if (travado() && editingId) resetForm(); render(); if (me && uid === me.uid) verificarAtrasos(); }, () => {});
 }
 
 let loginLigado = false;
 function ligarLogin() { loginLigado = true; Store.aoMudarLogin(u => {
   pararOuvir();
-  if (!u) { me = null; authMode('login'); return; }
+  if (!u) { me = null; atrasos = []; $('atrasoBar').hidden = true; authMode('login'); return; }
   me = { uid: u.uid, email: u.email, verificado: u.verificado };
   entrarNoSistema(me);
 }); }
@@ -232,6 +233,14 @@ function ligarLogin() { loginLigado = true; Store.aoMudarLogin(u => {
 // lançamentos antigos (só combustível) tinham "posto" no lugar de "descricao"
 const CATS = ["Combustível", "Pedágio", "Estacionamento", "Alimentação", "Hospedagem", "Transporte (táxi, app, ônibus)", "Material / suprimentos", "Outros"];
 const norm = x => ({ ...x, descricao: x.descricao || x.posto || '', categoria: x.categoria || 'Combustível' });
+// faixas do limite (o limite é o que cada funcionário cadastrou em "Meus dados"); compara em centavos
+function situacaoLimite(tot, L) {
+  const t = Math.round((Number(tot) || 0) * 100), l = Math.round((Number(L) || 0) * 100);
+  if (t > l) return { cls: 'over', txt: 'Acima do limite' };
+  if (t === l && l > 0) return { cls: 'warn', txt: 'Limite atingido' };
+  if (t > l * 0.9) return { cls: 'warn', txt: 'Perto do limite' };
+  return { cls: 'ok', txt: 'Dentro do limite' };
+}
 function totals() {
   const it = items(); const tot = it.reduce((s, x) => s + x.valor, 0);
   const porCat = {}; it.forEach(x => { porCat[x.categoria] = (porCat[x.categoria] || 0) + x.valor; });
@@ -246,9 +255,9 @@ function render() {
   const { it, tot, porCat } = totals(); const L = profile.limite; const pct = L ? tot / L : 0;
   $('gSpent').textContent = brl(tot); $('gOf').textContent = 'de ' + brl(L);
   $('barFill').style.width = Math.min(100, pct * 100) + '%';
-  const bar = $('bar'); bar.classList.toggle('warn', pct >= .85 && pct <= 1); bar.classList.toggle('over', pct > 1);
-  const pill = $('pill'); pill.className = 'pill ' + (pct > 1 ? 'over' : pct >= .85 ? 'warn' : 'ok');
-  pill.textContent = pct > 1 ? 'Acima do limite' : pct >= .85 ? 'Perto do limite' : 'Dentro do limite';
+  const sl = situacaoLimite(tot, L);
+  const bar = $('bar'); bar.classList.toggle('warn', sl.cls === 'warn'); bar.classList.toggle('over', sl.cls === 'over');
+  const pill = $('pill'); pill.className = 'pill ' + sl.cls; pill.textContent = sl.txt;
   const saldo = L - tot; $('sSaldo').textContent = brl(saldo); $('sSaldo').style.color = saldo < 0 ? 'var(--danger)' : '';
   $('sQtd').textContent = it.length; const sem = it.filter(x => !x.cupom).length; $('sSem').textContent = sem; $('sSem').style.color = sem ? 'var(--amber)' : '';
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -471,12 +480,12 @@ function renderFech() {
   const ro = readOnly(), f = fech, b = $('fechBanner');
   const quem = ro ? (profile.nome || profile.email || 'O funcionário') : 'Você';
   b.className = 'fech'; b.hidden = !f;
-  if (f && f.status === 'enviado') { b.classList.add('env'); b.innerHTML = '<b>Enviado para aprovação</b><span>' + esc(quem) + ' enviou este período em ' + quando(f.enviado_em) + '. Os lançamentos estão bloqueados.' + (ro ? '' : ' Se precisar alterar algo, peça ao administrador para devolver.') + '</span>'; }
+  if (f && f.status === 'enviado') { b.classList.add('env'); b.innerHTML = '<b>Enviado para aprovação</b><span>' + esc(quem) + ' enviou este período em ' + quando(f.enviado_em) + '. Os lançamentos estão bloqueados.' + (ro ? '' : ' Se precisar alterar algo, peça ao aprovador para devolver.') + '</span>'; }
   else if (f && f.status === 'aprovado') { b.classList.add('apr'); b.innerHTML = '<b>Aprovado</b><span>Aprovado por ' + esc(f.avaliado_nome || f.avaliado_por || '') + ' em ' + quando(f.avaliado_em) + '. Os lançamentos estão bloqueados.</span>'; }
   else if (f && f.status === 'devolvido') { b.classList.add('dev'); b.innerHTML = '<b>Devolvido para correção</b><span>Por ' + esc(f.avaliado_nome || f.avaliado_por || '') + ' em ' + quando(f.avaliado_em) + (ro ? '. Aguardando o funcionário corrigir e reenviar.' : '. Faça as correções e envie de novo.') + '</span>' + (f.motivo ? '<div class="motivo">' + esc(f.motivo) + '</div>' : ''); }
   if (!ro) $('formPanel').hidden = travado();
   $('envioBox').hidden = ro || travado();
-  if (!ro) { $('btnEnviar').textContent = f && f.status === 'devolvido' ? 'Reenviar ao administrador' : 'Enviar ao administrador'; }
+  if (!ro) { $('btnEnviar').textContent = f && f.status === 'devolvido' ? 'Reenviar ao aprovador' : 'Enviar ao aprovador'; }
   const podeAvaliar = isAprov && f && (f.status === 'enviado' || f.status === 'aprovado');
   $('avalBox').hidden = !podeAvaliar;
   if (podeAvaliar) {
@@ -492,7 +501,7 @@ $('btnEnviar').addEventListener('click', () => {
   if (!it.length) { $('envHint').textContent = 'Não há lançamentos neste período para enviar.'; return; }
   if (it.some(x => x.pendente)) { $('envHint').textContent = 'Há lançamentos aguardando internet para sincronizar. Conecte e tente de novo.'; return; }
   const sem = it.filter(x => !x.cupom).length;
-  $('envTxt').innerHTML = 'Enviar o relatório da fatura <b>' + nomeFatura(curKey) + '</b> (' + it.length + ' lançamento' + (it.length > 1 ? 's' : '') + ', total <b>' + brl(tot) + '</b>) ao administrador?<br>Depois de enviar, este período fica <b>bloqueado</b> para alterações.' +
+  $('envTxt').innerHTML = 'Enviar o relatório da fatura <b>' + nomeFatura(curKey) + '</b> (' + it.length + ' lançamento' + (it.length > 1 ? 's' : '') + ', total <b>' + brl(tot) + '</b>) ao aprovador?<br>Depois de enviar, este período fica <b>bloqueado</b> para alterações.' +
     (sem ? '<br><span class="warn-txt"><b>Atenção:</b> ' + sem + ' lançamento' + (sem > 1 ? 's estão' : ' está') + ' sem cupom anexado.</span>' : '');
   $('envConfirm').hidden = false; $('btnEnviar').hidden = true;
 });
@@ -526,6 +535,36 @@ $('btnDevOk').addEventListener('click', async () => {
   try { await avaliar('devolvido', m); $('dlgDev').close(); $('avalMsg').textContent = 'Devolvido para correção.'; } catch (e) { $('devErr').textContent = 'Não consegui devolver: ' + errMsg(e); }
   finally { $('btnDevOk').disabled = false; }
 });
+// ----- relatório atrasado: ciclo fechado há PRAZO_DIAS dias, com lançamentos, ainda não enviado (ou devolvido e não reenviado) -----
+const PRAZO_DIAS = 5;
+function atrasado(fim, hoje = new Date()) { const p = new Date(fim); p.setDate(p.getDate() + PRAZO_DIAS); const h = new Date(hoje); h.setHours(0, 0, 0, 0); return h >= p; }
+let atrasos = [], verificandoAtraso = null;
+function verificarAtrasos() {
+  if (!me) return;
+  clearTimeout(verificandoAtraso);
+  verificandoAtraso = setTimeout(async () => {
+    if (!me) return;
+    const uid = me.uid, F = myProfile.fech || 25, k0 = cycleKeyFor(new Date(), F), lista = [];
+    for (const k of [shiftKey(k0, -3), shiftKey(k0, -2), shiftKey(k0, -1)]) {
+      const { start, end } = cycleRange(k, F); if (!atrasado(end)) continue;
+      try {
+        const ls = await Store.lancamentosPeriodo(uid, iso(start), iso(end)); if (!ls.length) continue;
+        const f = await Store.lerFechamento(uid, k).catch(() => null);
+        if (!f || f.status === 'devolvido') lista.push({ k, end, devolvido: !!f });
+      } catch (_) {}
+    }
+    if (!me || me.uid !== uid) return;
+    atrasos = lista; mostrarAtrasos();
+  }, 400);
+}
+function mostrarAtrasos() {
+  const bar = $('atrasoBar'); bar.hidden = !atrasos.length;
+  bar.innerHTML = atrasos.map((a, i) => '<div class="linha"><span><b>Relatório atrasado: fatura ' + nomeFatura(a.k) + '</b><br>' +
+    (a.devolvido ? 'Foi devolvido para correção e ainda não foi reenviado ao aprovador.' : 'O ciclo fechou em ' + br(iso(a.end)) + ' e o relatório ainda não foi enviado ao aprovador.') +
+    '</span><button data-atraso="' + i + '">' + (a.devolvido ? 'Corrigir e reenviar' : 'Abrir e enviar') + '</button></div>').join('');
+}
+$('atrasoBar').addEventListener('click', e => { const b = e.target.closest('[data-atraso]'); if (!b) return; const a = atrasos[+b.dataset.atraso]; if (!a) return; curKey = a.k; abrirMeus(); $('envioBox').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+
 // pendências do administrador: períodos enviados (ciclo atual e anterior de cada funcionário)
 let pendencias = [];
 async function atualizarPendencias() {
@@ -714,8 +753,9 @@ async function carregarAdmin() {
   $('repBody').innerHTML = linhas.map(({ u, ls, e, f }) => {
     if (!ls) return '<tr><td>' + esc(u.nome || u.email) + '</td><td colspan="6" class="bad-txt">' + esc(errMsg(e)) + '</td></tr>';
     const tot = ls.reduce((s, x) => s + (Number(x.valor) || 0), 0); const sem = ls.filter(x => !x.cupom).length; const L = u.limite || 500;
-    const sit = !ls.length ? '<span class="hint">Sem lançamentos</span>' : tot > L ? '<span class="bad-txt">Acima do limite</span>' : tot >= .85 * L ? '<span class="warn-txt">Perto do limite</span>' : '<span class="ok-txt">Dentro do limite</span>';
-    return '<tr><td>' + esc(u.nome || '—') + '<div class="hint">' + esc(u.email) + '</div></td><td class="r num">' + ls.length + '</td><td class="r num">' + brl(tot) + '</td><td class="r num ' + (sem ? 'warn-txt' : '') + '">' + sem + '</td><td>' + sit + '</td><td>' + envioTag(f) + '</td><td class="r"><button class="link" data-ver="' + u.uid + '">' + (f && f.status === 'enviado' ? 'Avaliar' : 'Ver relatório') + '</button></td></tr>';
+    const sl = situacaoLimite(tot, L);
+    const sit = !ls.length ? '<span class="hint">Sem lançamentos</span>' : '<span class="' + { ok: 'ok-txt', warn: 'warn-txt', over: 'bad-txt' }[sl.cls] + '">' + sl.txt + '</span>';
+    return '<tr><td>' + esc(u.nome || '—') + '<div class="hint">' + esc(u.email) + '</div></td><td class="r num">' + ls.length + '</td><td class="r num">' + brl(tot) + '</td><td class="r num ' + (sem ? 'warn-txt' : '') + '">' + sem + '</td><td>' + sit + '</td><td>' + (!f && ls.length && atrasado(cycleRange(curKey, u.fech || 25).end) ? '<span class="bad-txt"><b>Atrasado</b></span><div class="hint">não enviado</div>' : envioTag(f)) + '</td><td class="r"><button class="link" data-ver="' + u.uid + '">' + (f && f.status === 'enviado' ? 'Avaliar' : 'Ver relatório') + '</button></td></tr>';
   }).join('') + semAcesso.map(c => '<tr><td>' + esc(c.nome || '—') + '<div class="hint">' + esc(c.email) + '</div></td><td colspan="5" class="hint">Ainda não fez o primeiro acesso</td><td></td></tr>').join('')
     || '<tr><td colspan="7" class="hint">Nenhum funcionário ainda. Libere o acesso no quadro abaixo.</td></tr>';
 }
