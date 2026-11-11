@@ -446,6 +446,20 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
       <div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Situação</th><th></th></tr></thead><tbody id="convBody"></tbody></table></div>
     </section>
 
+    <section class="panel" aria-labelledby="h-uso" id="usoPanel">
+      <div class="panel-head"><h2 id="h-uso">Uso do banco</h2><span class="hint" id="usoQuando"></span></div>
+      <div class="gauge">
+        <div class="gauge-nums"><span class="label">Usado</span><span class="big num" id="usoMB">—</span><small class="num">de 1 GiB grátis</small></div>
+        <div><div class="bar" id="usoBar"><i id="usoFill" style="width:0%"></i></div><div class="ticks"><span>0</span><span>256 MB</span><span>512 MB</span><span>768 MB</span><span>1 GB</span></div></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><span class="label">Fotos de cupons</span><b class="num" id="usoFotos">—</b></div>
+        <div class="stat"><span class="label">Lançamentos</span><b class="num" id="usoLanc">—</b></div>
+        <div class="stat"><span class="label">Previsão</span><b class="num" id="usoPrev">—</b></div>
+      </div>
+      <div class="dl-row"><button id="btnUso">Calcular agora</button><span class="hint" id="usoMsg">O cálculo lê os lançamentos de todos (consome algumas leituras da cota diária). Faça uma vez por mês.</span></div>
+    </section>
+
     <section class="panel" aria-labelledby="h-exp" id="expPanel">
       <div class="panel-head"><h2 id="h-exp">Exportar</h2></div>
       <div class="dl-row">

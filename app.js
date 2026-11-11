@@ -1,6 +1,6 @@
 (function () {
 'use strict';
-const APPVER = '2.5.2';
+const APPVER = '2.6.0';
 const $ = id => document.getElementById(id);
 const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -406,7 +406,7 @@ $('form').addEventListener('submit', e => {
   const oldPag = old && old.cupom ? old.cupom.paginas : 0;
   let cupom = old ? old.cupom || null : null, thumb = old ? old.thumb || null : null;
   if (pendingAtt && pendingAtt.novo) {
-    cupom = { paginas: pendingAtt.pages.length, tipo: pendingAtt.tipo, nome: pendingAtt.nome }; thumb = pendingAtt.thumb;
+    cupom = { paginas: pendingAtt.pages.length, tipo: pendingAtt.tipo, nome: pendingAtt.nome, bytes: pendingAtt.pages.reduce((s, p) => s + p.bytes.length, 0) }; thumb = pendingAtt.thumb;
     Store.salvarCupom(me.uid, id, pendingAtt.pages, oldPag).catch(x => status('Não consegui salvar o cupom: ' + errMsg(x), true));
   } else if (removedAtt && oldPag) {
     cupom = null; thumb = null; Store.excluirCupom(me.uid, id, oldPag).catch(() => {});
@@ -674,7 +674,7 @@ $('impDir').addEventListener('change', async e => {
     let cupom = null, thumb = null;
     const rel = x.anexo && x.anexo.arquivo; const f = rel && byRel.get(rel);
     if (f) {
-      try { const a = await processarArquivo(f); cupom = { paginas: a.pages.length, tipo: a.tipo, nome: (x.anexo.nome || f.name) }; thumb = a.thumb; Store.salvarCupom(me.uid, id, a.pages, 0).catch(() => {}); fotos++; }
+      try { const a = await processarArquivo(f); cupom = { paginas: a.pages.length, tipo: a.tipo, nome: (x.anexo.nome || f.name), bytes: a.pages.reduce((s, p) => s + p.bytes.length, 0) }; thumb = a.thumb; Store.salvarCupom(me.uid, id, a.pages, 0).catch(() => {}); fotos++; }
       catch (_) { falhas++; }
     }
     Store.salvarLancamento(me.uid, id, { data: x.data, categoria: 'Combustível', descricao: String(x.posto || '').slice(0, 200) || 'Combustível', valor: Number(x.valor), nf: x.cupom_nf || '', cupom, thumb, origem: 'importado' }, true)
@@ -693,7 +693,7 @@ function abrirAdmin() {
   viewUid = me.uid; profile = myProfile;
   $('tabMine').setAttribute('aria-selected', 'false'); $('tabAdmin').setAttribute('aria-selected', 'true');
   $('view-main').hidden = true; $('view-admin').hidden = false; $('roBanner').hidden = true;
-  $('funPanel').hidden = !isMaster; $('expPanel').hidden = !isMaster;
+  $('funPanel').hidden = !isMaster; $('expPanel').hidden = !isMaster; $('usoPanel').hidden = !isMaster; if (isMaster) mostrarUso();
   carregarAdmin();
 }
 async function carregarAdmin() {
@@ -768,6 +768,43 @@ $('fConv').addEventListener('submit', async e => {
   finally { $('btnConv').disabled = false; }
 });
 $('cSenha').value = senhaProvisoria();
+
+// ---------- uso do banco (estimativa) ----------
+// Cupons novos guardam o tamanho exato; os antigos usam uma média. O Firestore também conta índices,
+// por isso soma-se uma folga. É uma estimativa: o número oficial fica no console do Google Cloud.
+const MEDIA_FOTO = 250 * 1024, GIB = 1024 * 1024 * 1024;
+const mb = b => b < 1048576 ? Math.max(1, Math.round(b / 1024)).toLocaleString('pt-BR') + ' KB' : (b / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: b < 10485760 ? 1 : 0 }) + ' MB';
+function mostrarUso() {
+  let u = null; try { u = JSON.parse(localStorage.getItem('rg.uso') || 'null'); } catch (_) {}
+  if (!u) { $('usoQuando').textContent = 'Ainda não calculado'; return; }
+  const pct = u.total / GIB;
+  $('usoMB').textContent = mb(u.total); $('usoFill').style.width = Math.min(100, Math.max(pct * 100, u.total ? 0.5 : 0)) + '%';
+  $('usoBar').classList.toggle('warn', pct >= .7 && pct < .9); $('usoBar').classList.toggle('over', pct >= .9);
+  $('usoFotos').textContent = u.fotos + ' · ' + mb(u.bytesFotos); $('usoLanc').textContent = u.lanc;
+  // previsão: ritmo dos últimos 3 meses
+  if (u.porMes > 0) { const meses = (GIB - u.total) / u.porMes; $('usoPrev').textContent = meses > 120 ? 'mais de 10 anos' : meses >= 24 ? 'cerca de ' + Math.round(meses / 12) + ' anos' : 'cerca de ' + Math.max(0, Math.round(meses)) + ' meses'; }
+  else $('usoPrev').textContent = '—';
+  $('usoQuando').textContent = 'Calculado em ' + new Date(u.quando).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) + ' · ' + (pct * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%';
+}
+$('btnUso').addEventListener('click', async () => {
+  const msg = $('usoMsg'); $('btnUso').disabled = true; msg.textContent = 'Calculando…';
+  try {
+    const us = await Store.listarUsuarios(); let fotos = 0, bytesFotos = 0, lanc = 0, bytesLanc = 0, recentes = 0;
+    const limite3m = new Date(); limite3m.setMonth(limite3m.getMonth() - 3); const lim = iso(limite3m);
+    for (const u of us) {
+      const ls = await Store.todosLancamentos(u.uid);
+      for (const x of ls) {
+        lanc++; const t = 600 + ((x.thumb && x.thumb.length) || 0) + JSON.stringify({ d: x.descricao || x.posto, n: x.nf }).length;
+        let f = 0; if (x.cupom) { fotos += x.cupom.paginas || 1; f = x.cupom.bytes || (x.cupom.paginas || 1) * MEDIA_FOTO; bytesFotos += f; }
+        bytesLanc += t; if (x.data >= lim) recentes += t + f;
+      }
+    }
+    const total = Math.round((bytesFotos + bytesLanc + us.length * 2048) * 1.1);
+    try { localStorage.setItem('rg.uso', JSON.stringify({ quando: Date.now(), total, fotos, bytesFotos, lanc, porMes: recentes * 1.1 / 3 })); } catch (_) {}
+    mostrarUso(); msg.textContent = 'Estimativa feita a partir dos lançamentos. O número oficial aparece no console do Google Cloud.';
+  } catch (e) { msg.textContent = 'Não consegui calcular: ' + errMsg(e); }
+  finally { $('btnUso').disabled = false; }
+});
 
 // ---------- exportações ----------
 function baixar(nome, conteudo, tipo) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([conteudo], { type: tipo })); a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000); }
