@@ -1,6 +1,6 @@
 (function () {
 'use strict';
-const APPVER = '2.1.0';
+const APPVER = '2.2.0';
 const $ = id => document.getElementById(id);
 const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -53,7 +53,8 @@ const errMsg = e => {
 // Login
 // ======================================================================
 function authMode(mode) {
-  ['fLogin', 'fSignup', 'fReset', 'pVerify', 'pBlocked', 'pNoConfig', 'pAction'].forEach(id => $(id).hidden = true);
+  ['fLogin', 'fSignup', 'fReset', 'pVerify', 'pBlocked', 'pNoConfig', 'pAction', 'pSenha'].forEach(id => $(id).hidden = true);
+  if (mode === 'senha') $('pSenha').hidden = false;
   ({ login: 'fLogin', signup: 'fSignup', reset: 'fReset', verify: 'pVerify', blocked: 'pBlocked', noconfig: 'pNoConfig' })[mode] && ($({ login: 'fLogin', signup: 'fSignup', reset: 'fReset', verify: 'pVerify', blocked: 'pBlocked', noconfig: 'pNoConfig' }[mode]).hidden = false);
   ['lErr', 'sErr', 'rErr', 'rOk', 'vErr', 'vOk'].forEach(id => $(id).textContent = '');
   show('view-auth');
@@ -104,26 +105,41 @@ $('fReset').addEventListener('submit', async e => {
 });
 $('btnVerificado').addEventListener('click', async () => {
   $('vErr').textContent = '';
-  try { if (await Store.confirmarVerificacao()) entrarNoSistema({ uid: me.uid, email: me.email }); else $('vErr').textContent = 'Ainda não aparece como confirmado. Clique no link do e-mail e tente de novo.'; }
+  try { if (await Store.confirmarVerificacao()) entrarNoSistema({ uid: me.uid, email: me.email, verificado: true }); else $('vErr').textContent = 'Ainda não aparece como confirmado. Clique no link do e-mail e tente de novo.'; }
   catch (x) { $('vErr').textContent = authErr(x); }
 });
 $('btnReenviar').addEventListener('click', async () => {
   try { await Store.reenviarConfirmacao(); $('vOk').textContent = 'E-mail reenviado.'; } catch (x) { $('vErr').textContent = authErr(x); }
 });
 $('btnTentar').addEventListener('click', () => me && entrarNoSistema(me));
+$('fSenha').addEventListener('submit', async e => {
+  e.preventDefault(); $('tErr').textContent = ''; const s1 = $('tSenha').value, s2 = $('tSenha2').value;
+  if (s1.length < 8) { $('tErr').textContent = 'A senha precisa ter pelo menos 8 caracteres.'; return; }
+  if (s1 !== s2) { $('tErr').textContent = 'As duas senhas não são iguais.'; return; }
+  try { await Store.trocarMinhaSenha(s1); await Store.marcarSenhaTrocada(me.email); entrarNoSistema(me); }
+  catch (x) { $('tErr').textContent = x && x.code === 'auth/requires-recent-login' ? 'Por segurança, saia e entre de novo com a senha provisória, e depois crie a nova senha.' : authErr(x); }
+});
 
 // ======================================================================
 // Entrada no sistema
 // ======================================================================
 async function entrarNoSistema(u) {
-  me = { uid: u.uid, email: u.email };
+  const eu = me = { uid: u.uid, email: u.email, verificado: u.verificado !== false };
   show('view-wait');
+  if (!eu.verificado) {
+    // pode ter confirmado em outro aparelho ou aba
+    try { if (await Store.confirmarVerificacao()) eu.verificado = true; } catch (_) {}
+    if (me !== eu) return; // saiu ou trocou de conta enquanto isso
+  }
   let conv = null, semRede = false;
   try { conv = await Store.meuConvite(u.email); }
   catch (e) { // sem internet na abertura: segue com o que estiver guardado no aparelho
     semRede = true;
     conv = (() => { try { return JSON.parse(localStorage.getItem('rg.conv.' + u.uid) || 'null'); } catch (_) { return null; } })();
   }
+  // conta criada pelo administrador dispensa a confirmação por e-mail
+  if (me !== eu) return;
+  if (!eu.verificado && !(conv && conv.conta_admin)) { $('vEmail').textContent = u.email; authMode('verify'); return; }
   if (!conv || !conv.ativo) {
     $('bEmail').textContent = u.email; authMode('blocked');
     $('pBlocked').querySelector('p').innerHTML = semRede
@@ -131,7 +147,8 @@ async function entrarNoSistema(u) {
       : 'O e-mail <b>' + esc(u.email) + '</b> ainda não está liberado para usar o sistema. Peça ao administrador para liberar o seu acesso.';
     return;
   }
-  try { localStorage.setItem('rg.conv.' + u.uid, JSON.stringify({ ativo: conv.ativo, admin: !!conv.admin })); } catch (_) {}
+  if (conv.trocar_senha && !semRede) { $('tErr').textContent = ''; $('fSenha').reset(); authMode('senha'); return; }
+  try { localStorage.setItem('rg.conv.' + u.uid, JSON.stringify({ ativo: conv.ativo, admin: !!conv.admin, conta_admin: !!conv.conta_admin })); } catch (_) {}
   isAdmin = !!conv.admin;
   let p = null;
   try { p = await Store.perfil(u.uid); } catch (_) {}
@@ -179,14 +196,8 @@ function assinar() {
 function ligarLogin() { Store.aoMudarLogin(u => {
   if (unsub) { unsub(); unsub = null; }
   if (!u) { me = null; authMode('login'); return; }
-  me = { uid: u.uid, email: u.email };
-  if (!u.verificado) {
-    // pode ter confirmado em outro aparelho ou aba: confere antes de pedir de novo
-    Store.confirmarVerificacao().then(ok => { if (ok) entrarNoSistema(u); else { $('vEmail').textContent = u.email; authMode('verify'); } })
-      .catch(() => { $('vEmail').textContent = u.email; authMode('verify'); });
-    return;
-  }
-  entrarNoSistema(u);
+  me = { uid: u.uid, email: u.email, verificado: u.verificado };
+  entrarNoSistema(me);
 }); }
 
 // ======================================================================
@@ -563,25 +574,44 @@ function renderConvites() {
   $('funCount').textContent = convites.filter(c => c.ativo).length + ' com acesso';
   $('convBody').innerHTML = convites.sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email, 'pt-BR')).map(c => {
     const eu = c.email === me.email;
-    return '<tr><td>' + esc(c.nome || '—') + '</td><td>' + esc(c.email) + '</td><td>' + (c.ativo ? '<span class="tag on">Ativo</span>' : '<span class="tag off">Desativado</span>') + (c.admin ? ' <span class="tag adm">Administrador</span>' : '') + '</td><td class="r">' +
+    return '<tr><td>' + esc(c.nome || '—') + '</td><td>' + esc(c.email) + '</td><td>' + (c.ativo ? '<span class="tag on">Ativo</span>' : '<span class="tag off">Desativado</span>') + (c.admin ? ' <span class="tag adm">Administrador</span>' : '') + (c.trocar_senha ? ' <span class="tag" style="color:var(--amber)">Ainda não trocou a senha</span>' : '') + '</td><td class="r">' +
       (eu ? '<span class="hint">você</span>' : (c.ativo ? '<button class="link danger" data-cv="off" data-em="' + esc(c.email) + '">Desativar</button>' : '<button class="link" data-cv="on" data-em="' + esc(c.email) + '">Reativar</button>') +
-        (c.admin ? '<button class="link" data-cv="noadm" data-em="' + esc(c.email) + '">Tirar admin</button>' : '<button class="link" data-cv="adm" data-em="' + esc(c.email) + '">Tornar admin</button>')) + '</td></tr>';
+        (c.admin ? '<button class="link" data-cv="noadm" data-em="' + esc(c.email) + '">Tirar admin</button>' : '<button class="link" data-cv="adm" data-em="' + esc(c.email) + '">Tornar admin</button>') +
+        (c.conta_admin ? '' : '<button class="link" data-cv="dispensa" data-em="' + esc(c.email) + '" title="Para quem criou a própria senha e não consegue abrir o link de confirmação">Dispensar confirmação</button>')) + '</td></tr>';
   }).join('');
 }
 $('convBody').addEventListener('click', async e => {
   const b = e.target.closest('[data-cv]'); if (!b) return; const c = convites.find(x => x.email === b.dataset.em); if (!c) return;
   const novo = { nome: c.nome || '', ativo: c.ativo, admin: !!c.admin };
+  if (b.dataset.cv === 'dispensa') novo.conta_admin = true;
   if (b.dataset.cv === 'off') novo.ativo = false; if (b.dataset.cv === 'on') novo.ativo = true; if (b.dataset.cv === 'adm') novo.admin = true; if (b.dataset.cv === 'noadm') novo.admin = false;
   b.disabled = true;
   try { await Store.salvarConvite(c.email, novo); Object.assign(c, novo); renderConvites(); carregarAdmin(); } catch (x) { $('cErr').textContent = errMsg(x); b.disabled = false; }
 });
+function senhaProvisoria() { const L = 'ABCDEFGHJKLMNPQRSTUVWXYZ', l = 'abcdefghijkmnpqrstuvwxyz', d = '23456789'; const r = s => s[crypto.getRandomValues(new Uint32Array(1))[0] % s.length];
+  return r(L) + r(l) + r(l) + r(l) + '-' + r(d) + r(d) + r(d) + r(d) + '-' + r(L) + r(l) + r(l); }
 $('fConv').addEventListener('submit', async e => {
-  e.preventDefault(); $('cErr').textContent = '';
-  const em = $('cEmail').value.trim().toLowerCase(), nome = $('cNome').value.trim();
+  e.preventDefault(); $('cErr').textContent = ''; $('cRes').hidden = true;
+  const em = $('cEmail').value.trim().toLowerCase(), nome = $('cNome').value.trim(), senha = $('cSenha').value.trim(), adm = $('cAdmin').checked;
   if (!/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(em)) { $('cErr').textContent = 'Informe um e-mail válido.'; return; }
-  try { await Store.salvarConvite(em, { nome, ativo: true, admin: $('cAdmin').checked }); $('fConv').reset(); $('cErr').textContent = ''; carregarAdmin(); }
-  catch (x) { $('cErr').textContent = 'Não consegui liberar: ' + errMsg(x); }
+  if (senha.length < 8) { $('cErr').textContent = 'A senha provisória precisa ter pelo menos 8 caracteres.'; return; }
+  $('btnConv').disabled = true;
+  try {
+    await Store.salvarConvite(em, { nome, ativo: true, admin: adm });
+    let criada = true;
+    try { await Store.criarContaFuncionario(em, senha); }
+    catch (x) { if (x && x.code === 'auth/email-already-in-use') criada = false; else throw x; }
+    if (criada) {
+      await Store.salvarConvite(em, { nome, ativo: true, admin: adm, conta_admin: true, trocar_senha: true });
+      $('cRes').innerHTML = '<b class="ok-txt">Acesso criado.</b> Passe para ' + esc(nome || em) + ':<br>Site: <code>' + esc(location.origin + location.pathname) + '</code><br>E-mail: <code>' + esc(em) + '</code><br>Senha provisória: <code>' + esc(senha) + '</code><br><span class="hint">No primeiro login ele cria a senha dele.</span>';
+    } else {
+      $('cRes').innerHTML = '<b>Acesso liberado.</b> Essa pessoa já tinha criado uma senha, então ela entra com a senha dela. Se ela não conseguir confirmar o e-mail, use <b>Dispensar confirmação</b> na lista abaixo.';
+    }
+    $('cRes').hidden = false; $('fConv').reset(); $('cSenha').value = senhaProvisoria(); carregarAdmin();
+  } catch (x) { $('cErr').textContent = 'Não consegui criar o acesso: ' + (x && x.code && x.code.startsWith('auth/') ? authErr(x) : errMsg(x)); }
+  finally { $('btnConv').disabled = false; }
 });
+$('cSenha').value = senhaProvisoria();
 
 // ---------- exportações ----------
 function baixar(nome, conteudo, tipo) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([conteudo], { type: tipo })); a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000); }

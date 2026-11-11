@@ -156,6 +156,8 @@ details.cfg[open] summary{margin-bottom:12px}
 .auth-card .links{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
 .auth-card p{margin:0}
 .msg-ok{font-size:.88rem;color:var(--ok)}
+#cRes{border:1px solid var(--ok);border-radius:10px;padding:10px 12px;color:var(--fg)}
+#cRes code{font-size:1rem;background:var(--soft);padding:2px 6px;border-radius:6px;user-select:all}
 .userbox{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
 .userbox .who{font-size:.85rem;color:var(--muted);text-align:right}
 .userbox .who b{color:var(--fg);display:block}
@@ -226,6 +228,17 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
     <div id="pBlocked" hidden>
       <p>O e-mail <b id="bEmail"></b> ainda não está liberado para usar o sistema. Peça ao administrador para liberar o seu acesso.</p>
       <div class="form-actions"><button class="primary" id="btnTentar">Tentar de novo</button><button class="link" data-sair>Sair</button></div>
+    </div>
+
+    <div id="pSenha" hidden>
+      <p>Bem-vindo! Crie a sua senha para os próximos acessos.</p>
+      <form id="fSenha" novalidate>
+        <div class="f"><label class="label" for="tSenha">Nova senha (mínimo 8 caracteres)</label><input id="tSenha" type="password" autocomplete="new-password"></div>
+        <div class="f"><label class="label" for="tSenha2">Repita a nova senha</label><input id="tSenha2" type="password" autocomplete="new-password"></div>
+        <div class="err" id="tErr" role="alert"></div>
+        <button class="primary" type="submit">Salvar e entrar</button>
+      </form>
+      <div class="form-actions"><button class="link" data-sair>Sair</button></div>
     </div>
 
     <div id="pAction" hidden>
@@ -369,11 +382,13 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
       <form class="adm-form" id="fConv" novalidate>
         <div class="f s2"><label class="label" for="cEmail">E-mail</label><input id="cEmail" type="email" placeholder="nome@empresa.com.br"></div>
         <div class="f s2"><label class="label" for="cNome">Nome</label><input id="cNome"></div>
-        <label class="chk s1h"><input type="checkbox" id="cAdmin"> Administrador</label>
-        <button class="primary" type="submit">Liberar acesso</button>
+        <div class="f s2"><label class="label" for="cSenha">Senha provisória</label><input id="cSenha" autocomplete="off"></div>
+        <label class="chk s2"><input type="checkbox" id="cAdmin"> Administrador</label>
+        <button class="primary s2" type="submit" id="btnConv">Criar acesso</button>
         <div class="err s6" id="cErr" role="alert"></div>
       </form>
-      <p class="hint">Depois de liberar, avise a pessoa para abrir este site e tocar em <b>Primeiro acesso</b> com o mesmo e-mail.</p>
+      <div class="hint" id="cRes" hidden></div>
+      <p class="hint">O sistema cria a conta com a senha provisória. Passe o e-mail e a senha para a pessoa; no primeiro login ela cria a senha dela.</p>
       <div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Situação</th><th></th></tr></thead><tbody id="convBody"></tbody></table></div>
     </section>
 

@@ -53,8 +53,23 @@
     },
     async listarConvites() { const s = await db.collection('convites').get(); return s.docs.map(d => ({ email: d.id, ...d.data() })); },
     async salvarConvite(email, dados) {
-      await db.collection('convites').doc(email.trim().toLowerCase()).set({ nome: dados.nome || '', ativo: !!dados.ativo, admin: !!dados.admin, alterado_em: FV.serverTimestamp() }, { merge: true });
+      const d = { nome: dados.nome || '', ativo: !!dados.ativo, admin: !!dados.admin, alterado_em: FV.serverTimestamp() };
+      if ('conta_admin' in dados) d.conta_admin = !!dados.conta_admin;
+      if ('trocar_senha' in dados) d.trocar_senha = !!dados.trocar_senha;
+      await db.collection('convites').doc(email.trim().toLowerCase()).set(d, { merge: true });
     },
+    // o administrador cria a conta do funcionário com senha provisória, numa conexão separada
+    // (assim ele continua logado com a própria conta)
+    async criarContaFuncionario(email, senha) {
+      const app2 = firebase.apps.find(a => a.name === 'cadastro') || firebase.initializeApp(firebase.app().options, 'cadastro');
+      const a2 = app2.auth();
+      if (firebase.app().options.emulador && !a2.__emu) { a2.useEmulator(firebase.app().options.emulador.auth); a2.__emu = true; }
+      await a2.setPersistence(firebase.auth.Auth.Persistence.NONE);
+      await a2.createUserWithEmailAndPassword(email.trim().toLowerCase(), senha);
+      await a2.signOut();
+    },
+    async trocarMinhaSenha(nova) { await auth.currentUser.updatePassword(nova); },
+    async marcarSenhaTrocada(email) { await db.collection('convites').doc(email.toLowerCase()).update({ trocar_senha: false }); },
     async excluirConvite(email) { await db.collection('convites').doc(email.toLowerCase()).delete(); },
 
     // ---------- perfil ----------
