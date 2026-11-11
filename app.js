@@ -1,6 +1,6 @@
 (function () {
 'use strict';
-const APPVER = '2.5.0';
+const APPVER = '2.5.1';
 const $ = id => document.getElementById(id);
 const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -178,7 +178,7 @@ async function entrarNoSistema(u) {
   if (!p) { novoPerfil = true; p = { ...DEF, nome: conv.nome || '', email: u.email }; Store.salvarPerfil(u.uid, p).catch(e => status('Não consegui salvar seus dados: ' + errMsg(e), true)); }
   myProfile = { ...DEF, ...p, email: u.email };
   $('whoName').textContent = myProfile.nome || u.email; $('whoEmail').textContent = myProfile.nome ? u.email : '';
-  $('tabs').hidden = !isAprov; $('tabAdminTxt').textContent = isMaster ? 'Administração' : 'Aprovações';
+  $('tabs').hidden = !isAprov; $('tabAdminTxt').textContent = isMaster ? 'Administração' : 'Aprovações'; $('btnRoBack').textContent = isMaster ? 'Voltar para a administração' : 'Voltar para as aprovações';
   curKey = cycleKeyFor(new Date(), myProfile.fech);
   abrirMeus();
   show('view-app');
