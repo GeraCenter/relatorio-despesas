@@ -1,7 +1,7 @@
 {
-  "name": "Relatório de Gasolina — Gera Center",
-  "short_name": "Gasolina",
-  "description": "Lançamento de abastecimentos do cartão corporativo e relatório mensal para assinar",
+  "name": "Relatório de Despesas — Gera Center",
+  "short_name": "Despesas",
+  "description": "Lançamento de despesas do cartão corporativo e relatório mensal para assinar",
   "lang": "pt-BR",
   "start_url": "./",
   "scope": "./",

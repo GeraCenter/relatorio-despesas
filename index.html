@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Relatório de Gasolina</title>
-<meta name="description" content="Relatório mensal de gasolina do cartão corporativo — Gera Center">
+<title>Relatório de Despesas</title>
+<meta name="description" content="Relatório mensal de despesas do cartão corporativo — Gera Center">
 <meta name="theme-color" content="#f5b400">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Gasolina">
+<meta name="apple-mobile-web-app-title" content="Despesas">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -66,7 +66,7 @@ button.primary:hover{filter:brightness(1.08)}
 button.link{border:none;background:none;padding:4px 6px;color:var(--accent);font-weight:600}
 button.danger{color:var(--danger)}
 button:disabled{opacity:.5;cursor:not-allowed}
-/* marcador de combustível */
+/* marcador do limite */
 .gauge{display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px;align-items:center}
 .gauge-nums{display:flex;flex-direction:column;gap:2px}
 .gauge-nums .big{font-family:var(--f-display);font-size:2.4rem;font-weight:700;line-height:1}
@@ -188,7 +188,7 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
 <div id="view-auth" class="auth" hidden>
   <div class="auth-card">
     <span class="logo-chip"><img src="icons/logo.png" alt="Gera Center"></span>
-    <div><div class="label">Cartão corporativo · combustível</div><h1>Relatório de Gasolina</h1></div>
+    <div><div class="label">Cartão corporativo</div><h1>Relatório de Despesas</h1></div>
 
     <form id="fLogin" novalidate>
       <div class="f"><label class="label" for="lEmail">E-mail</label><input id="lEmail" type="email" autocomplete="username" inputmode="email"></div>
@@ -228,6 +228,17 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
       <div class="form-actions"><button class="primary" id="btnTentar">Tentar de novo</button><button class="link" data-sair>Sair</button></div>
     </div>
 
+    <div id="pAction" hidden>
+      <p id="aMsg">Verificando o link…</p>
+      <form id="fNova" novalidate hidden>
+        <div class="f"><label class="label" for="nSenha">Nova senha (mínimo 8 caracteres)</label><input id="nSenha" type="password" autocomplete="new-password"></div>
+        <div class="f"><label class="label" for="nSenha2">Repita a nova senha</label><input id="nSenha2" type="password" autocomplete="new-password"></div>
+        <div class="err" id="nErr" role="alert"></div>
+        <button class="primary" type="submit">Salvar nova senha</button>
+      </form>
+      <div class="form-actions" id="aCont" hidden><button class="primary" id="btnAContinuar">Continuar</button></div>
+    </div>
+
     <div id="pNoConfig" hidden>
       <p class="bad-txt"><b>Sistema ainda não configurado.</b> Falta colar a configuração do Firebase no arquivo <code>config.js</code>.</p>
     </div>
@@ -238,8 +249,8 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
 <div class="wrap" id="view-app" hidden>
   <header class="top">
     <div class="brandrow"><span class="logo-chip"><img src="icons/logo.png" alt="Gera Center"></span><div>
-      <div class="label">Cartão corporativo · combustível</div>
-      <h1>Relatório de Gasolina <span class="ver" id="appVer"></span></h1>
+      <div class="label">Cartão corporativo</div>
+      <h1>Relatório de Despesas <span class="ver" id="appVer"></span></h1>
     </div></div>
     <div class="cycle" role="group" aria-label="Ciclo da fatura">
       <button id="prev" aria-label="Ciclo anterior">‹</button>
@@ -264,28 +275,25 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
           <div class="gauge-nums"><span class="label">Gasto</span><span class="big num" id="gSpent">R$ 0,00</span><small class="num" id="gOf">de R$ 500,00</small></div>
           <div>
             <div class="bar" id="bar"><i id="barFill" style="width:0%"></i></div>
-            <div class="ticks"><span>E</span><span>¼</span><span>½</span><span>¾</span><span>F</span></div>
+            <div class="ticks"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
           </div>
         </div>
         <div class="stats">
           <div class="stat"><span class="label">Saldo</span><b class="num" id="sSaldo">R$ 500,00</b></div>
-          <div class="stat"><span class="label">Litros</span><b class="num" id="sLitros">0,00 L</b></div>
-          <div class="stat"><span class="label">Preço médio</span><b class="num" id="sMedio">—</b></div>
+          <div class="stat"><span class="label">Lançamentos</span><b class="num" id="sQtd">0</b></div>
+          <div class="stat"><span class="label">Sem cupom</span><b class="num" id="sSem">0</b></div>
         </div>
         <div class="hint" id="daysLeft"></div>
       </section>
 
       <section class="panel" aria-labelledby="h-form" id="formPanel">
-        <div class="panel-head"><h2 id="h-form">Novo abastecimento</h2></div>
+        <div class="panel-head"><h2 id="h-form">Nova despesa</h2></div>
         <form id="form" novalidate>
           <div class="f s2 s1h"><label class="label" for="iData">Data</label><input type="date" id="iData" required></div>
-          <div class="f s4"><label class="label" for="iPosto">Posto</label><input id="iPosto" placeholder="Ex.: Posto Ipiranga Av. Brasil" autocomplete="off" list="postos"><datalist id="postos"></datalist></div>
-          <div class="f s2 s1h"><label class="label" for="iComb">Combustível</label>
-            <select id="iComb"><option>Gasolina comum</option><option>Gasolina aditivada</option></select></div>
-          <div class="f s2 s1h"><label class="label" for="iLitros">Litros</label><input id="iLitros" inputmode="decimal" placeholder="0,000" autocomplete="off"></div>
-          <div class="f s2 s1h"><label class="label" for="iValor">Valor (R$)</label><input id="iValor" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
-          <div class="f s3 s1h"><label class="label" for="iKm">Km do veículo</label><input id="iKm" inputmode="numeric" placeholder="Opcional" autocomplete="off"></div>
-          <div class="f s3 s1h"><label class="label" for="iNf">Nº cupom / NF</label><input id="iNf" placeholder="Opcional" autocomplete="off"></div>
+          <div class="f s2 s1h"><label class="label" for="iCat">Categoria</label><select id="iCat"><option>Combustível</option><option>Pedágio</option><option>Estacionamento</option><option>Alimentação</option><option>Hospedagem</option><option>Transporte (táxi, app, ônibus)</option><option>Material / suprimentos</option><option>Outros</option></select></div>
+          <div class="f s2"><label class="label" for="iValor">Valor (R$)</label><input id="iValor" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+          <div class="f s4"><label class="label" for="iDesc">Descrição</label><input id="iDesc" placeholder="Ex.: Posto Shell Av. Paulista, Pedágio Anhanguera" autocomplete="off" list="descs" maxlength="200"><datalist id="descs"></datalist></div>
+          <div class="f s2"><label class="label" for="iNf">Nº cupom / NF</label><input id="iNf" placeholder="Opcional" autocomplete="off"></div>
           <div class="attach" id="attBox">
             <div class="cam-row">
               <button type="button" class="clip" id="btnCam"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg> Tirar foto</button>
@@ -301,7 +309,6 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
           <div class="form-actions">
             <button class="primary" type="submit" id="btnSave">Adicionar</button>
             <button type="button" id="btnCancel" hidden>Cancelar edição</button>
-            <span class="hint" id="ppl"></span>
           </div>
         </form>
       </section>
@@ -328,7 +335,7 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
         </details>
         <details class="cfg" id="impBox">
           <summary>Trazer lançamentos do programa antigo (Windows)</summary>
-          <p class="hint">Escolha a pasta <b>Relatório de Gasolina</b> (a que tem o arquivo dados.json e a pasta comprovantes). Os lançamentos e os cupons são copiados para cá. Pode repetir sem medo: nada é duplicado.</p>
+          <p class="hint">Escolha a pasta <b>Relatório de Gasolina</b> criada pelo programa antigo (a que tem o arquivo dados.json e a pasta comprovantes). Os lançamentos e os cupons são copiados para cá. Pode repetir sem medo: nada é duplicado.</p>
           <div class="dl-row"><button id="btnImp">Escolher a pasta…</button><span class="hint" id="impMsg"></span></div>
           <input type="file" id="impDir" webkitdirectory directory multiple hidden>
         </details>

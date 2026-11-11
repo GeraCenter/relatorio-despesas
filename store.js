@@ -2,7 +2,7 @@
 // Estrutura no Firestore:
 //   convites/{email}                         { nome, ativo, admin }
 //   usuarios/{uid}                           perfil { nome, cargo, emissor, cartao, placa, empresa, limite, fech, email }
-//   usuarios/{uid}/lancamentos/{id}          { data:'AAAA-MM-DD', posto, comb, litros, valor, km, nf, cupom:{paginas,tipo,nome}|null, thumb }
+//   usuarios/{uid}/lancamentos/{id}          { data:'AAAA-MM-DD', categoria, descricao, valor, nf, cupom:{paginas,tipo,nome}|null, thumb }
 //   usuarios/{uid}/cupons/{id}_{n}           { img: Bytes(JPEG), w, h, lancamento }
 (function () {
   'use strict';
@@ -40,6 +40,10 @@
       return true;
     },
     async esqueciSenha(email) { await auth.sendPasswordResetEmail(email.trim()); },
+    // links dos e-mails (confirmação e nova senha) tratados pelo próprio site
+    async aplicarCodigo(codigo) { await auth.applyActionCode(codigo); },
+    async emailDoCodigoSenha(codigo) { return await auth.verifyPasswordResetCode(codigo); },
+    async trocarSenha(codigo, senha) { await auth.confirmPasswordReset(codigo, senha); },
     async sair() { await auth.signOut(); },
 
     // ---------- convites ----------
@@ -77,7 +81,7 @@
     async todosLancamentos(uid) { const s = await db.collection('usuarios').doc(uid).collection('lancamentos').get(); return s.docs.map(d => ({ id: d.id, ...d.data() })); },
     // não espera o servidor: sem internet, fica guardado e sobe sozinho depois
     salvarLancamento(uid, id, x, novo) {
-      const dados = { data: x.data, posto: x.posto, comb: x.comb || 'Gasolina comum', litros: Number(x.litros) || 0, valor: Number(x.valor), km: x.km || '', nf: x.nf || '',
+      const dados = { data: x.data, categoria: x.categoria || 'Outros', descricao: x.descricao, valor: Number(x.valor), nf: x.nf || '',
         cupom: x.cupom || null, thumb: x.thumb || null, origem: x.origem || 'web', alterado_em: FV.serverTimestamp() };
       if (novo) dados.criado_em = FV.serverTimestamp();
       return db.collection('usuarios').doc(uid).collection('lancamentos').doc(id).set(dados, { merge: true });

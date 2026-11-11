@@ -1,6 +1,6 @@
 (function () {
 'use strict';
-const APPVER = '2.0.0';
+const APPVER = '2.1.0';
 const $ = id => document.getElementById(id);
 const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -53,7 +53,7 @@ const errMsg = e => {
 // Login
 // ======================================================================
 function authMode(mode) {
-  ['fLogin', 'fSignup', 'fReset', 'pVerify', 'pBlocked', 'pNoConfig'].forEach(id => $(id).hidden = true);
+  ['fLogin', 'fSignup', 'fReset', 'pVerify', 'pBlocked', 'pNoConfig', 'pAction'].forEach(id => $(id).hidden = true);
   ({ login: 'fLogin', signup: 'fSignup', reset: 'fReset', verify: 'pVerify', blocked: 'pBlocked', noconfig: 'pNoConfig' })[mode] && ($({ login: 'fLogin', signup: 'fSignup', reset: 'fReset', verify: 'pVerify', blocked: 'pBlocked', noconfig: 'pNoConfig' }[mode]).hidden = false);
   ['lErr', 'sErr', 'rErr', 'rOk', 'vErr', 'vOk'].forEach(id => $(id).textContent = '');
   show('view-auth');
@@ -66,6 +66,7 @@ document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click'
 document.querySelectorAll('[data-sair]').forEach(b => b.addEventListener('click', () => Store.sair()));
 
 const authErr = e => {
+  if (e && e.code === 'auth/expired-action-code') return 'O link expirou. Peça um novo.';
   const c = e && e.code || '';
   return ({
     'auth/invalid-email': 'E-mail inválido.',
@@ -168,7 +169,7 @@ function assinar() {
   lancs = []; render();
   const { start, end } = cycleRange(curKey);
   unsub = Store.ouvirLancamentos(viewUid, iso(start), iso(end), (list, doCache) => {
-    lancs = list; render();
+    lancs = list.map(norm); render();
     const pend = list.filter(x => x.pendente).length;
     if (pend) status(pend + ' lançamento' + (pend > 1 ? 's' : '') + ' aguardando internet para sincronizar.', true);
     else status(doCache ? 'Sem conexão: mostrando o que está guardado no aparelho.' : 'Tudo sincronizado.', doCache);
@@ -179,45 +180,55 @@ function ligarLogin() { Store.aoMudarLogin(u => {
   if (unsub) { unsub(); unsub = null; }
   if (!u) { me = null; authMode('login'); return; }
   me = { uid: u.uid, email: u.email };
-  if (!u.verificado) { $('vEmail').textContent = u.email; authMode('verify'); return; }
+  if (!u.verificado) {
+    // pode ter confirmado em outro aparelho ou aba: confere antes de pedir de novo
+    Store.confirmarVerificacao().then(ok => { if (ok) entrarNoSistema(u); else { $('vEmail').textContent = u.email; authMode('verify'); } })
+      .catch(() => { $('vEmail').textContent = u.email; authMode('verify'); });
+    return;
+  }
   entrarNoSistema(u);
 }); }
 
 // ======================================================================
 // Tela principal
 // ======================================================================
+// lançamentos antigos (só combustível) tinham "posto" no lugar de "descricao"
+const CATS = ["Combustível", "Pedágio", "Estacionamento", "Alimentação", "Hospedagem", "Transporte (táxi, app, ônibus)", "Material / suprimentos", "Outros"];
+const norm = x => ({ ...x, descricao: x.descricao || x.posto || '', categoria: x.categoria || 'Combustível' });
 function totals() {
-  const it = items(); const tot = it.reduce((s, x) => s + x.valor, 0); const lit = it.reduce((s, x) => s + (x.litros || 0), 0);
-  const litComValor = it.filter(x => x.litros).reduce((s, x) => s + x.valor, 0); return { it, tot, lit, medio: lit ? litComValor / lit : 0 };
+  const it = items(); const tot = it.reduce((s, x) => s + x.valor, 0);
+  const porCat = {}; it.forEach(x => { porCat[x.categoria] = (porCat[x.categoria] || 0) + x.valor; });
+  return { it, tot, porCat };
 }
+const catResumo = porCat => Object.entries(porCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => c + ' ' + brl(v)).join(' · ');
 function render() {
   const { start, end } = cycleRange(curKey); const [y, m] = curKey.split('-').map(Number);
   $('cycTitle').textContent = 'Fatura ' + MESES[m - 1] + '/' + y;
   $('cycRange').textContent = br(iso(start)) + ' a ' + br(iso(end));
   $('iData').min = iso(start); $('iData').max = iso(end);
-  const { it, tot, lit, medio } = totals(); const L = profile.limite; const pct = L ? tot / L : 0;
+  const { it, tot, porCat } = totals(); const L = profile.limite; const pct = L ? tot / L : 0;
   $('gSpent').textContent = brl(tot); $('gOf').textContent = 'de ' + brl(L);
   $('barFill').style.width = Math.min(100, pct * 100) + '%';
   const bar = $('bar'); bar.classList.toggle('warn', pct >= .85 && pct <= 1); bar.classList.toggle('over', pct > 1);
   const pill = $('pill'); pill.className = 'pill ' + (pct > 1 ? 'over' : pct >= .85 ? 'warn' : 'ok');
   pill.textContent = pct > 1 ? 'Acima do limite' : pct >= .85 ? 'Perto do limite' : 'Dentro do limite';
   const saldo = L - tot; $('sSaldo').textContent = brl(saldo); $('sSaldo').style.color = saldo < 0 ? 'var(--danger)' : '';
-  $('sLitros').textContent = n2(lit) + ' L'; $('sMedio').textContent = medio ? brl(medio) + '/L' : '—';
+  $('sQtd').textContent = it.length; const sem = it.filter(x => !x.cupom).length; $('sSem').textContent = sem; $('sSem').style.color = sem ? 'var(--amber)' : '';
   const today = new Date(); today.setHours(0, 0, 0, 0);
   if (today >= start && today <= end) { const dl = Math.round((end - today) / 864e5); $('daysLeft').textContent = dl === 0 ? 'A fatura fecha hoje.' : 'Faltam ' + dl + ' dia' + (dl > 1 ? 's' : '') + ' para o fechamento (' + br(iso(end)) + ').'; }
   else $('daysLeft').textContent = today > end ? 'Ciclo encerrado.' : 'Ciclo futuro.';
   $('count').textContent = it.length ? it.length + ' lançamento' + (it.length > 1 ? 's' : '') : '';
-  const postos = [...new Set(it.map(x => x.posto))]; $('postos').innerHTML = postos.map(p => '<option value="' + esc(p) + '">').join('');
-  renderList(it); renderSheet(it, tot, lit);
+  const ds = [...new Set(it.map(x => x.descricao))]; $('descs').innerHTML = ds.map(p => '<option value="' + esc(p) + '">').join('');
+  renderList(it); renderSheet(it, tot, porCat);
 }
 function renderList(it) {
   const ro = readOnly();
-  if (!it.length) { $('list').innerHTML = '<div class="empty"><b>Nenhum abastecimento neste ciclo</b>' + (ro ? 'Este funcionário ainda não lançou nada neste ciclo.' : 'Preencha o formulário acima com a data, o posto e o valor. No celular, toque em <b>Tirar foto</b> para anexar o cupom.') + '</div>'; return; }
-  let h = '<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Posto</th><th class="r">Litros</th><th class="r">Valor</th><th></th></tr></thead><tbody>';
+  if (!it.length) { $('list').innerHTML = '<div class="empty"><b>Nenhuma despesa neste ciclo</b>' + (ro ? 'Este funcionário ainda não lançou nada neste ciclo.' : 'Preencha o formulário acima com a data, a categoria, a descrição e o valor. No celular, toque em <b>Tirar foto</b> para anexar o cupom.') + '</div>'; return; }
+  let h = '<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Descrição</th><th class="r">Valor</th><th></th></tr></thead><tbody>';
   it.forEach(x => {
-    h += '<tr class="' + (x.id === editingId ? 'editing' : '') + '"><td class="num">' + br(x.data) + '</td><td>' + esc(x.posto) + '<div class="hint">' + esc(x.comb) + (x.nf ? ' · NF ' + esc(x.nf) : '') + (x.km ? ' · ' + esc(x.km) + ' km' : '') + '</div>' +
+    h += '<tr class="' + (x.id === editingId ? 'editing' : '') + '"><td class="num">' + br(x.data) + '</td><td>' + esc(x.descricao) + '<div class="hint">' + [esc(x.categoria), x.nf ? 'NF ' + esc(x.nf) : ''].filter(Boolean).join(' · ') + '</div>' +
       (x.cupom ? '' : '<div class="nocupom">sem cupom anexado</div>') + (x.pendente ? '<div class="sync">aguardando sincronizar</div>' : '') +
-      '</td><td class="r num">' + (x.litros ? n2(x.litros, 3) : '—') + '</td><td class="r num">' + brl(x.valor) + '</td><td class="r">';
+      '</td><td class="r num">' + brl(x.valor) + '</td><td class="r">';
     if (confirmId === x.id) h += '<span class="confirm">Excluir? <button class="link danger" data-act="del" data-id="' + x.id + '">Sim</button><button class="link" data-act="nodel">Não</button></span>';
     else h += (x.cupom ? '<button class="icon-btn" data-act="view" data-id="' + x.id + '" title="Ver cupom" aria-label="Ver cupom">' + CLIP + '</button>' : '') +
       (ro ? '' : '<button class="link" data-act="edit" data-id="' + x.id + '">Editar</button><button class="link danger" data-act="ask" data-id="' + x.id + '">Excluir</button>');
@@ -228,20 +239,21 @@ function renderList(it) {
 function cardTxt() { const p = profile; return [p.emissor, p.cartao ? 'final ' + p.cartao : ''].filter(Boolean).join(' · ') || '—'; }
 function periodText() { const { start, end } = cycleRange(curKey); return br(iso(start)) + ' a ' + br(iso(end)); }
 function refMonth() { const [y, m] = curKey.split('-').map(Number); return MESES_L[m - 1] + '/' + y; }
-const DECL_BASE = 'Declaro que as despesas acima foram realizadas com o cartão de crédito corporativo exclusivamente para abastecimento de gasolina em atividades a serviço da empresa, e que os comprovantes seguem anexos.';
+const DECL_BASE = 'Declaro que as despesas acima foram realizadas com o cartão de crédito corporativo exclusivamente em atividades a serviço da empresa, e que os comprovantes seguem anexos.';
 let DECL = DECL_BASE;
-function renderSheet(it, tot, lit) {
+function renderSheet(it, tot, porCat) {
   const p = profile; const L = p.limite;
-  let rows = it.map((x, i) => '<tr><td>' + (i + 1) + '</td><td>' + br(x.data) + '</td><td>' + esc(x.posto) + '</td><td>' + esc(x.nf || '—') + '</td><td class="r">' + (x.litros ? n2(x.litros, 3) : '—') + '</td><td class="r">' + brl(x.valor) + '</td></tr>').join('');
+  let rows = it.map((x, i) => '<tr><td>' + (i + 1) + '</td><td>' + br(x.data) + '</td><td>' + esc(x.categoria) + '</td><td>' + esc(x.descricao) + '</td><td>' + esc(x.nf || '—') + '</td><td class="r">' + brl(x.valor) + '</td></tr>').join('');
   if (!rows) rows = '<tr><td colspan="6" style="color:#888;text-align:center;padding:14px">Sem lançamentos neste ciclo</td></tr>';
   $('sheet').innerHTML =
-    '<div class="sh-head"><img src="icons/logo.png" alt="Gera Center"><h3>Relatório de Despesas<br>Cartão Corporativo · Combustível</h3></div>' +
+    '<div class="sh-head"><img src="icons/logo.png" alt="Gera Center"><h3>Relatório de Despesas<br>Cartão Corporativo</h3></div>' +
     '<div class="meta num"><div><span>Colaborador:</span> ' + esc(p.nome || '________________') + '</div><div><span>Empresa:</span> ' + esc(p.empresa || '—') + '</div>' +
     '<div><span>Cargo/Depto:</span> ' + esc(p.cargo || '—') + '</div>' +
     '<div><span>Cartão:</span> ' + esc(cardTxt()) + '</div><div><span>Veículo:</span> ' + esc(p.placa || '—') + '</div>' +
     '<div><span>Fatura:</span> ' + refMonth() + '</div><div><span>Período:</span> ' + periodText() + '</div></div>' +
-    '<table class="num"><thead><tr><th>#</th><th>Data</th><th>Posto</th><th>Cupom/NF</th><th class="r">Litros</th><th class="r">Valor</th></tr></thead><tbody>' + rows +
-    '<tr class="tot"><td colspan="4">Total</td><td class="r">' + n2(lit, 3) + '</td><td class="r">' + brl(tot) + '</td></tr></tbody></table>' +
+    '<table class="num"><thead><tr><th>#</th><th>Data</th><th>Categoria</th><th>Descrição</th><th>Cupom/NF</th><th class="r">Valor</th></tr></thead><tbody>' + rows +
+    '<tr class="tot"><td colspan="5">Total</td><td class="r">' + brl(tot) + '</td></tr></tbody></table>' +
+    (Object.keys(porCat || {}).length > 1 ? '<div class="decl"><span style="color:#666">Por categoria:</span> ' + esc(catResumo(porCat)) + '</div>' : '') +
     '<div class="meta num"><div><span>Limite do ciclo:</span> ' + brl(L) + '</div><div><span>Saldo:</span> ' + brl(L - tot) + (tot > L ? ' (excedido)' : '') + '</div></div>' +
     '<div class="decl">' + DECL + '</div>' +
     '<div class="sigs"><div class="sig">' + (esc(p.nome) || '&nbsp;') + '<small>Data ___/___/____</small></div></div>';
@@ -325,21 +337,18 @@ $('vClose').addEventListener('click', () => $('viewer').close());
 // Formulário de lançamento
 // ======================================================================
 function defaultDate() { const { start, end } = cycleRange(curKey); const t = new Date(); t.setHours(0, 0, 0, 0); return iso(t < start ? start : t > end ? end : t); }
-function resetForm() { editingId = null; $('form').reset(); $('iData').value = defaultDate(); pendingAtt = null; removedAtt = false; showAtt(); $('btnSave').textContent = 'Adicionar'; $('btnCancel').hidden = true; $('formErr').textContent = ''; $('ppl').textContent = ''; }
-function updPpl() { const l = parseNum($('iLitros').value), v = parseNum($('iValor').value); $('ppl').textContent = (l > 0 && v > 0) ? 'Preço por litro: ' + brl(v / l) : ''; }
-$('iLitros').addEventListener('input', updPpl); $('iValor').addEventListener('input', updPpl);
+function resetForm() { editingId = null; $('form').reset(); $('iData').value = defaultDate(); pendingAtt = null; removedAtt = false; showAtt(); $('btnSave').textContent = 'Adicionar'; $('btnCancel').hidden = true; $('formErr').textContent = ''; try { const c = localStorage.getItem('rg.cat'); if (c && CATS.includes(c)) $('iCat').value = c; } catch (_) {} }
 $('btnCancel').addEventListener('click', () => { resetForm(); render(); });
 
 $('form').addEventListener('submit', e => {
   e.preventDefault(); if (readOnly()) return;
-  const data = $('iData').value, posto = $('iPosto').value.trim(), valor = parseNum($('iValor').value), litros = parseNum($('iLitros').value);
+  const data = $('iData').value, descricao = $('iDesc').value.trim(), categoria = $('iCat').value, valor = parseNum($('iValor').value);
   const err = m => { $('formErr').textContent = m; };
-  if (!data) return err('Informe a data do abastecimento.');
+  if (!data) return err('Informe a data da despesa.');
   const { start, end } = cycleRange(curKey); const d = fromIso(data);
   if (d < start || d > end) return err('A data precisa estar entre ' + periodText() + '. Para outro período, troque o ciclo no topo.');
-  if (!posto) return err('Informe o nome do posto.');
+  if (!descricao) return err('Informe a descrição, por exemplo o nome do estabelecimento.');
   if (!(valor > 0)) return err('Informe o valor pago, por exemplo 150,00.');
-  if ($('iLitros').value.trim() && !(litros > 0)) return err('Litros inválidos. Use vírgula para decimais, por exemplo 25,312.');
   const old = editingId ? lancs.find(x => x.id === editingId) : null;
   const id = old ? old.id : Store.novoId(me.uid);
   const oldPag = old && old.cupom ? old.cupom.paginas : 0;
@@ -350,17 +359,18 @@ $('form').addEventListener('submit', e => {
   } else if (removedAtt && oldPag) {
     cupom = null; thumb = null; Store.excluirCupom(me.uid, id, oldPag).catch(() => {});
   }
-  const rec = { data, posto, comb: $('iComb').value, valor: Math.round(valor * 100) / 100, litros: litros > 0 ? litros : 0, km: $('iKm').value.trim(), nf: $('iNf').value.trim(), cupom, thumb };
+  const rec = { data, categoria, descricao, valor: Math.round(valor * 100) / 100, nf: $('iNf').value.trim(), cupom, thumb };
+  try { localStorage.setItem('rg.cat', categoria); } catch (_) {}
   // não espera o servidor: aparece na hora e sincroniza quando houver internet
   Store.salvarLancamento(me.uid, id, rec, !old).catch(x => status('Não consegui salvar o lançamento: ' + errMsg(x), true));
-  resetForm(); $('iPosto').focus();
+  resetForm(); $('iDesc').focus();
 });
 
 $('list').addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b) return; const id = b.dataset.id, act = b.dataset.act;
   const x = lancs.find(z => z.id === id);
   if (act === 'view' && x) {
-    $('vTitle').textContent = br(x.data) + ' · ' + x.posto + ' · ' + brl(x.valor); $('vBody').innerHTML = '<span class="hint">Carregando…</span>'; $('viewer').showModal();
+    $('vTitle').textContent = br(x.data) + ' · ' + x.descricao + ' · ' + brl(x.valor); $('vBody').innerHTML = '<span class="hint">Carregando…</span>'; $('viewer').showModal();
     try { const imgs = await cupomImagens(viewUid, x); $('vBody').innerHTML = imgs.length ? '' : '<span class="hint">Cupom não encontrado.</span>'; imgs.forEach(i => { const im = new Image(); im.src = i.url; im.alt = 'Cupom'; $('vBody').appendChild(im); }); }
     catch (er) { $('vBody').innerHTML = '<span class="bad-txt">Não consegui abrir o cupom: ' + esc(errMsg(er)) + '</span>'; }
     return;
@@ -371,10 +381,9 @@ $('list').addEventListener('click', async e => {
   else if (act === 'del' && x) { confirmId = null; if (editingId === id) resetForm(); Store.excluirLancamento(me.uid, id, x.cupom ? x.cupom.paginas : 0).catch(er => status('Não consegui excluir: ' + errMsg(er), true)); }
   else if (act === 'edit' && x) {
     resetForm(); editingId = id;
-    $('iData').value = x.data; $('iPosto').value = x.posto; $('iComb').value = x.comb; $('iValor').value = n2(x.valor);
-    $('iLitros').value = x.litros ? n2(x.litros, 3) : ''; $('iKm').value = x.km || ''; $('iNf').value = x.nf || '';
+    $('iData').value = x.data; $('iDesc').value = x.descricao; $('iCat').value = CATS.includes(x.categoria) ? x.categoria : 'Outros'; $('iValor').value = n2(x.valor); $('iNf').value = x.nf || '';
     pendingAtt = x.cupom ? { novo: false, nome: x.cupom.nome, tipo: x.cupom.tipo, thumb: x.thumb } : null; showAtt();
-    $('btnSave').textContent = 'Salvar alteração'; $('btnCancel').hidden = false; updPpl(); $('formPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('btnSave').textContent = 'Salvar alteração'; $('btnCancel').hidden = false; $('formPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   render();
 });
@@ -409,32 +418,33 @@ async function attachmentPages() {
     const x = it[i]; if (!x.cupom) continue; let imgs = [];
     try { imgs = await cupomImagens(viewUid, x); } catch (_) {}
     imgs.forEach((im, k) => out.push({ url: im.url, w: im.w, h: im.h, titulo: 'Comprovante ' + (i + 1) + (imgs.length > 1 ? ' (' + (k + 1) + '/' + imgs.length + ')' : ''),
-      sub: br(x.data) + ' · ' + x.posto + ' · ' + brl(x.valor) + (x.nf ? ' · Cupom/NF ' + x.nf : '') }));
+      sub: br(x.data) + ' · ' + x.categoria + ' · ' + x.descricao + ' · ' + brl(x.valor) + (x.nf ? ' · Cupom/NF ' + x.nf : '') }));
   }
   return out;
 }
 function setDecl(withAtt) { const it = items(); const com = it.filter(x => x.cupom).length; DECL = withAtt && com ? DECL_BASE.replace('seguem anexos.', 'seguem anexos (' + com + ' de ' + it.length + ' lançamento' + (it.length > 1 ? 's' : '') + ').') : DECL_BASE; }
 async function logoDataUrl() { if (LOGO) return LOGO; try { const r = await fetch('icons/logo.png'); LOGO = await blobToDataUrl(await r.blob()); } catch (_) { LOGO = null; } return LOGO; }
-function nomeArquivo() { const [yy, mm] = curKey.split('-'); const n = (profile.nome || 'colaborador').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, ''); return 'Relatorio-Gasolina-' + yy + '-' + mm + '-' + n; }
+function nomeArquivo() { const [yy, mm] = curKey.split('-'); const n = (profile.nome || 'colaborador').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, ''); return 'Relatorio-Despesas-' + yy + '-' + mm + '-' + n; }
 async function buildPdf(withAtt) {
   setDecl(withAtt);
   const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const p = profile, { it, tot, lit } = totals(), W = 210, M = 16;
+  const p = profile, { it, tot, porCat } = totals(), W = 210, M = 16;
   const logo = await logoDataUrl(); if (logo) { try { doc.addImage(logo, 'PNG', M, 9, 30, 30 / 1.671); } catch (e) {} }
   doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(58, 58, 55);
   doc.text('Relatório de Despesas', M + 36, 15.5); doc.setFontSize(10.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(90);
-  doc.text('Cartão Corporativo · Combustível', M + 36, 21);
+  doc.text('Cartão Corporativo', M + 36, 21);
   doc.setDrawColor(245, 180, 0); doc.setLineWidth(1); doc.line(M, 30, W - M, 30);
   doc.setTextColor(30); doc.setFontSize(9.5);
   const meta = [['Colaborador', p.nome || ''], ['Empresa', p.empresa || '—'], ['Cargo/Depto', p.cargo || '—'], ['Cartão', cardTxt()], ['Veículo', p.placa || '—'], ['Fatura', refMonth()], ['Período', periodText()]];
   meta.forEach((r, i) => { const x = i % 2 ? W / 2 + 4 : M, y = 37 + Math.floor(i / 2) * 6; doc.setFont('helvetica', 'normal'); doc.setTextColor(100); doc.text(r[0] + ':', x, y); doc.setTextColor(20); doc.setFont('helvetica', 'bold'); doc.text(r[1] || '________________________', x + 27, y); });
-  const body = it.map((x, i) => [i + 1, br(x.data), x.posto + (x.comb === 'Gasolina aditivada' ? ' (aditivada)' : ''), x.nf || '—', x.km || '—', x.litros ? n2(x.litros, 3) : '—', x.litros ? n2(x.valor / x.litros, 3) : '—', brl(x.valor)]);
-  doc.autoTable({ startY: 63, margin: { left: M, right: M }, head: [['#', 'Data', 'Posto', 'Cupom/NF', 'Km', 'Litros', 'R$/L', 'Valor']], body,
-    foot: [['', '', 'Total', '', '', n2(lit, 3), '', brl(tot)]], theme: 'grid',
+  const body = it.map((x, i) => [i + 1, br(x.data), x.categoria, x.descricao, x.nf || '—', brl(x.valor)]);
+  doc.autoTable({ startY: 63, margin: { left: M, right: M }, head: [['#', 'Data', 'Categoria', 'Descrição', 'Cupom/NF', 'Valor']], body,
+    foot: [['', '', 'Total', '', '', brl(tot)]], theme: 'grid',
     styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 1.8, lineColor: [200, 200, 200], lineWidth: .2 },
     headStyles: { fillColor: [58, 58, 55], textColor: 255 }, footStyles: { fillColor: [253, 240, 204], textColor: 20, fontStyle: 'bold' },
-    columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 20 }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right', cellWidth: 24 } } });
+    columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 20 }, 2: { cellWidth: 32 }, 4: { cellWidth: 24 }, 5: { halign: 'right', cellWidth: 26 } } });
   let y = doc.lastAutoTable.finalY + 8;
+  if (Object.keys(porCat).length > 1) { doc.setFontSize(9); doc.setTextColor(90); const cl = doc.splitTextToSize('Por categoria: ' + catResumo(porCat), W - 2 * M); doc.text(cl, M, y); y += cl.length * 4.4 + 3; }
   doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(60);
   doc.text('Limite do ciclo: ' + brl(p.limite) + '     Saldo: ' + brl(p.limite - tot) + (tot > p.limite ? ' (excedido)' : ''), M, y); y += 8;
   const lines = doc.splitTextToSize(DECL, W - 2 * M); doc.text(lines, M, y); y += lines.length * 4.6 + 6;
@@ -442,7 +452,7 @@ async function buildPdf(withAtt) {
   const cw = 100, sx = (W - cw) / 2;
   doc.line(sx, sy, sx + cw, sy); doc.setTextColor(20); doc.setFont('helvetica', 'bold'); doc.text(p.nome || '', sx + cw / 2, sy + 5, { align: 'center' });
   doc.setFont('helvetica', 'normal'); doc.setTextColor(100); doc.text('Data ____/____/______', sx + cw / 2, sy + 10, { align: 'center' });
-  doc.setFontSize(7.5); doc.setTextColor(150); doc.text('Gerado em ' + new Date().toLocaleString('pt-BR') + ' · Relatório de Gasolina v' + APPVER, M, 290);
+  doc.setFontSize(7.5); doc.setTextColor(150); doc.text('Gerado em ' + new Date().toLocaleString('pt-BR') + ' · Relatório de Despesas v' + APPVER, M, 290);
   if (withAtt) {
     for (const pg of await attachmentPages()) {
       doc.addPage();
@@ -472,7 +482,7 @@ $('btnPrint').addEventListener('click', async () => {
         d.querySelector('b').textContent = pg.titulo; d.querySelector('span').textContent = pg.sub; d.querySelector('img').src = pg.url; box.appendChild(d);
       }
     } catch (_) {}
-    setDecl(true); const t = totals(); renderSheet(t.it, t.tot, t.lit); msg.textContent = '';
+    setDecl(true); const t = totals(); renderSheet(t.it, t.tot, t.porCat); msg.textContent = '';
   }
   const t = document.title; document.title = nomeArquivo();
   await new Promise(r => setTimeout(r, 80)); window.print(); document.title = t; box.innerHTML = ''; setDecl(false); render();
@@ -507,7 +517,7 @@ $('impDir').addEventListener('change', async e => {
       try { const a = await processarArquivo(f); cupom = { paginas: a.pages.length, tipo: a.tipo, nome: (x.anexo.nome || f.name) }; thumb = a.thumb; Store.salvarCupom(me.uid, id, a.pages, 0).catch(() => {}); fotos++; }
       catch (_) { falhas++; }
     }
-    Store.salvarLancamento(me.uid, id, { data: x.data, posto: String(x.posto || '').slice(0, 200) || 'Posto', comb: x.combustivel || 'Gasolina comum', litros: Number(x.litros) || 0, valor: Number(x.valor), km: x.km || '', nf: x.cupom_nf || '', cupom, thumb, origem: 'importado' }, true)
+    Store.salvarLancamento(me.uid, id, { data: x.data, categoria: 'Combustível', descricao: String(x.posto || '').slice(0, 200) || 'Combustível', valor: Number(x.valor), nf: x.cupom_nf || '', cupom, thumb, origem: 'importado' }, true)
       .catch(er => status('Falha ao importar: ' + errMsg(er), true));
   }
   msg.textContent = itens.length + ' lançamento' + (itens.length > 1 ? 's' : '') + ' importado' + (itens.length > 1 ? 's' : '') + ', com ' + fotos + ' cupo' + (fotos === 1 ? 'm' : 'ns') + (falhas ? '. ' + falhas + ' cupom(ns) não puderam ser lidos.' : '.') + ' Use as setas do topo para ver os outros meses.';
@@ -536,7 +546,7 @@ async function carregarAdmin() {
   const lista = usuarios.filter(u => ativos.has((u.email || '').toLowerCase())).sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email, 'pt-BR'));
   const linhas = await Promise.all(lista.map(async u => {
     const F = u.fech || 25; const { start, end } = cycleRange(curKey, F);
-    try { const ls = await Store.lancamentosPeriodo(u.uid, iso(start), iso(end)); return { u, ls }; } catch (e) { return { u, ls: null, e }; }
+    try { const ls = (await Store.lancamentosPeriodo(u.uid, iso(start), iso(end))).map(norm); return { u, ls }; } catch (e) { return { u, ls: null, e }; }
   }));
   const semAcesso = convites.filter(c => c.ativo && !usuarios.some(u => (u.email || '').toLowerCase() === c.email));
   $('repHint').textContent = lista.length + ' funcionário' + (lista.length !== 1 ? 's' : '') + (semAcesso.length ? ' · ' + semAcesso.length + ' ainda não entrou' + (semAcesso.length > 1 ? 'aram' : '') : '');
@@ -579,20 +589,20 @@ const csvCel = v => { const s = String(v ?? ''); return /[;"\n]/.test(s) ? '"' +
 $('btnCsv').addEventListener('click', async () => {
   const msg = $('expMsg'); msg.textContent = 'Montando planilha…';
   try {
-    const us = await Store.listarUsuarios(); const linhas = [['Funcionário', 'E-mail', 'Fatura', 'Data', 'Posto', 'Combustível', 'Litros', 'Valor (R$)', 'Km', 'Cupom/NF', 'Comprovante anexado']];
+    const us = await Store.listarUsuarios(); const linhas = [['Funcionário', 'E-mail', 'Fatura', 'Data', 'Categoria', 'Descrição', 'Valor (R$)', 'Cupom/NF', 'Comprovante anexado']];
     for (const u of us) {
       const { start, end } = cycleRange(curKey, u.fech || 25);
-      const ls = (await Store.lancamentosPeriodo(u.uid, iso(start), iso(end))).sort((a, b) => a.data.localeCompare(b.data));
-      for (const x of ls) linhas.push([u.nome || '', u.email || '', curKey, br(x.data), x.posto, x.comb, n2(x.litros || 0, 3), n2(x.valor), x.km || '', x.nf || '', x.cupom ? 'Sim' : 'Não']);
+      const ls = (await Store.lancamentosPeriodo(u.uid, iso(start), iso(end))).map(norm).sort((a, b) => a.data.localeCompare(b.data));
+      for (const x of ls) linhas.push([u.nome || '', u.email || '', curKey, br(x.data), x.categoria, x.descricao, n2(x.valor), x.nf || '', x.cupom ? 'Sim' : 'Não']);
     }
-    baixar('Gasolina-' + curKey + '-todos.csv', '﻿' + linhas.map(l => l.map(csvCel).join(';')).join('\r\n'), 'text/csv;charset=utf-8');
+    baixar('Despesas-' + curKey + '-todos.csv', '﻿' + linhas.map(l => l.map(csvCel).join(';')).join('\r\n'), 'text/csv;charset=utf-8');
     msg.textContent = (linhas.length - 1) + ' lançamentos exportados. Abre direto no Excel.';
   } catch (e) { msg.textContent = 'Não consegui exportar: ' + errMsg(e); }
 });
 async function backup(comFotos) {
   const msg = $('expMsg'); msg.textContent = 'Preparando backup…';
   try {
-    const out = { app: 'relatorio-gasolina-web', versao: APPVER, gerado_em: new Date().toISOString(), convites: await Store.listarConvites(), usuarios: [] };
+    const out = { app: 'relatorio-despesas-web', versao: APPVER, gerado_em: new Date().toISOString(), convites: await Store.listarConvites(), usuarios: [] };
     const us = await Store.listarUsuarios(); let i = 0;
     for (const u of us) {
       msg.textContent = 'Backup: ' + (++i) + ' de ' + us.length + ' funcionários…';
@@ -608,7 +618,7 @@ async function backup(comFotos) {
       out.usuarios.push({ ...pf, lancamentos });
     }
     out.convites.forEach(c => { for (const k of ['criado_em', 'alterado_em']) if (c[k] && c[k].toDate) c[k] = c[k].toDate().toISOString(); });
-    baixar('backup-relatorio-gasolina-' + iso(new Date()) + (comFotos ? '-com-fotos' : '') + '.json', JSON.stringify(out, null, comFotos ? 0 : 2), 'application/json');
+    baixar('backup-relatorio-despesas-' + iso(new Date()) + (comFotos ? '-com-fotos' : '') + '.json', JSON.stringify(out, null, comFotos ? 0 : 2), 'application/json');
     msg.textContent = 'Backup gerado. Guarde o arquivo em local seguro (ele contém dados dos funcionários).';
   } catch (e) { msg.textContent = 'Não consegui gerar o backup: ' + errMsg(e); }
 }
@@ -616,12 +626,40 @@ $('btnBkData').addEventListener('click', () => backup(false));
 $('btnBkFull').addEventListener('click', () => backup(true));
 
 // ======================================================================
+// Links que chegam por e-mail (?mode=verifyEmail|resetPassword&oobCode=...)
+// ======================================================================
+function tratarLinkDeEmail() {
+  const q = new URLSearchParams(location.search); const mode = q.get('mode'), code = q.get('oobCode');
+  if (!mode || !code) return false;
+  const limpar = () => history.replaceState(null, '', location.pathname);
+  authMode('action'); $('pAction').hidden = false; $('fNova').hidden = true; $('aCont').hidden = true; $('aMsg').textContent = 'Verificando o link…';
+  let emailReset = '';
+  $('btnAContinuar').onclick = () => { limpar(); if (emailReset) { $('lEmail').value = emailReset; } ligarLogin(); };
+  if (mode === 'verifyEmail') {
+    Store.aplicarCodigo(code).then(() => { $('aMsg').innerHTML = '<span class="ok-txt"><b>E-mail confirmado!</b></span> Toque em Continuar para entrar.'; })
+      .catch(e => { $('aMsg').textContent = e && e.code === 'auth/invalid-action-code' ? 'Este link já foi usado ou expirou. Se o e-mail já foi confirmado, é só continuar. Se não, entre e toque em Reenviar e-mail.' : 'Não consegui confirmar: ' + authErr(e); })
+      .finally(() => { $('aCont').hidden = false; });
+  } else if (mode === 'resetPassword') {
+    Store.emailDoCodigoSenha(code).then(em => { emailReset = em; $('aMsg').innerHTML = 'Crie uma nova senha para <b>' + esc(em) + '</b>.'; $('fNova').hidden = false; })
+      .catch(e => { $('aMsg').textContent = 'Este link já foi usado ou expirou. Volte ao login e use Esqueci a senha de novo.'; $('aCont').hidden = false; });
+    $('fNova').onsubmit = async ev => {
+      ev.preventDefault(); $('nErr').textContent = ''; const s1 = $('nSenha').value, s2 = $('nSenha2').value;
+      if (s1.length < 8) { $('nErr').textContent = 'A senha precisa ter pelo menos 8 caracteres.'; return; }
+      if (s1 !== s2) { $('nErr').textContent = 'As duas senhas não são iguais.'; return; }
+      try { await Store.trocarSenha(code, s1); $('fNova').hidden = true; $('aMsg').innerHTML = '<span class="ok-txt"><b>Senha alterada.</b></span> Toque em Continuar e entre com a nova senha.'; $('aCont').hidden = false; }
+      catch (e) { $('nErr').textContent = authErr(e); }
+    };
+  } else { $('aMsg').textContent = 'Link não reconhecido.'; $('aCont').hidden = false; }
+  return true;
+}
+
+// ======================================================================
 // Início
 // ======================================================================
 const cfg = window.FIREBASE_CONFIG || {};
 if (!cfg.apiKey || cfg.apiKey === 'COLE_AQUI') { authMode('noconfig'); }
 else {
-  try { Store.iniciar(cfg); ligarLogin(); } catch (e) { authMode('noconfig'); $('pNoConfig').innerHTML = '<p class="bad-txt">Erro na configuração do Firebase: ' + esc(e.message) + '</p>'; }
+  try { Store.iniciar(cfg); if (!tratarLinkDeEmail()) ligarLogin(); } catch (e) { authMode('noconfig'); $('pNoConfig').innerHTML = '<p class="bad-txt">Erro na configuração do Firebase: ' + esc(e.message) + '</p>'; }
 }
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
