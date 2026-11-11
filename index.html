@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Relatório de Gasolina</title>
+<meta name="description" content="Relatório mensal de gasolina do cartão corporativo — Gera Center">
+<meta name="theme-color" content="#f5b400">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gasolina">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<style>
+@font-face{font-family:'Barlow Semi Condensed';font-weight:500;font-style:normal;font-display:swap;src:url(fonts/barlow-semi-condensed-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Barlow Semi Condensed';font-weight:600;font-style:normal;font-display:swap;src:url(fonts/barlow-semi-condensed-latin-600-normal.woff2) format('woff2')}
+@font-face{font-family:'Barlow Semi Condensed';font-weight:700;font-style:normal;font-display:swap;src:url(fonts/barlow-semi-condensed-latin-700-normal.woff2) format('woff2')}
+@font-face{font-family:'Public Sans';font-weight:400;font-style:normal;font-display:swap;src:url(fonts/public-sans-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'Public Sans';font-weight:500;font-style:normal;font-display:swap;src:url(fonts/public-sans-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Public Sans';font-weight:600;font-style:normal;font-display:swap;src:url(fonts/public-sans-latin-600-normal.woff2) format('woff2')}
+/* Layout: coluna de trabalho (marcador + lançamento + lista) e prévia A4 do relatório ao lado; empilha no celular */
+:root{
+  --bg:#f5f4f0; --surface:#ffffff; --fg:#1d1d1b; --muted:#66655f; --line:#dedcd4;
+  --accent:#3a3a37; --accent-fg:#ffffff; --brand:#f5b400; --amber:#e07b00; --danger:#b42318; --ok:#1f7a4a;
+  --soft:#f1efe7;
+  --f-display:"Barlow Semi Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141413; --surface:#1e1e1c; --fg:#ecebe6; --muted:#a3a29a; --line:#33332f;
+  --accent:#f5b400; --accent-fg:#1d1d1b; --brand:#f5b400; --amber:#ff9a3c; --danger:#f2786d; --ok:#5cc58c; --soft:#262623; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141413; --surface:#1e1e1c; --fg:#ecebe6; --muted:#a3a29a; --line:#33332f;
+  --accent:#f5b400; --accent-fg:#1d1d1b; --brand:#f5b400; --amber:#ff9a3c; --danger:#f2786d; --ok:#5cc58c; --soft:#262623; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance;letter-spacing:.01em}
+h1{font-size:1.9rem;font-weight:700}
+h2{font-size:1.25rem;font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+.label{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+header.top{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:end;justify-content:space-between}
+header.top p{margin:2px 0 0;color:var(--muted)}
+.ver{font-family:var(--f-body);font-size:.78rem;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:2px 8px;vertical-align:middle;letter-spacing:.02em}
+.brandrow{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.logo-chip{background:#fff;border-radius:10px;padding:6px 10px;border:1px solid var(--line);display:flex}.logo-chip img{height:46px;width:auto;display:block}
+.cycle{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:6px}
+.cycle button{width:36px;height:36px}
+.cycle .cyc-txt{min-width:200px;text-align:center;padding:0 4px}
+.cycle .cyc-txt b{display:block;font-family:var(--f-display);font-size:1.1rem}
+.cycle .cyc-txt span{font-size:.8rem;color:var(--muted)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:20px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.col{display:flex;flex-direction:column;gap:20px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:8px 14px;font-weight:600}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+button.primary:hover{filter:brightness(1.08)}
+button.link{border:none;background:none;padding:4px 6px;color:var(--accent);font-weight:600}
+button.danger{color:var(--danger)}
+button:disabled{opacity:.5;cursor:not-allowed}
+/* marcador de combustível */
+.gauge{display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px;align-items:center}
+.gauge-nums{display:flex;flex-direction:column;gap:2px}
+.gauge-nums .big{font-family:var(--f-display);font-size:2.4rem;font-weight:700;line-height:1}
+.gauge-nums small{color:var(--muted)}
+.bar{position:relative;height:22px;border-radius:6px;background:var(--soft);overflow:hidden;border:1px solid var(--line)}
+.bar i{position:absolute;inset:0 auto 0 0;background:var(--brand);transition:width .4s}
+.bar.warn i{background:var(--amber)} .bar.over i{background:var(--danger)}
+.ticks{display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted);margin-top:4px;font-family:var(--f-display);font-weight:600;letter-spacing:.06em}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.stat{border-top:1px solid var(--line);padding-top:8px}
+.stat b{display:block;font-size:1.05rem}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:.78rem;font-weight:600;border:1px solid currentColor}
+.pill.ok{color:var(--ok)} .pill.warn{color:var(--amber)} .pill.over{color:var(--danger)}
+/* formulário */
+form{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+.f{display:flex;flex-direction:column;gap:4px;min-width:0}
+.s2{grid-column:span 2}.s3{grid-column:span 3}.s4{grid-column:span 4}.s6{grid-column:span 6}
+@media (max-width:560px){form{grid-template-columns:repeat(2,minmax(0,1fr))}.s2,.s3,.s4,.s6{grid-column:span 2}.s1h{grid-column:span 1}}
+input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+.hint{font-size:.78rem;color:var(--muted)}
+.err{font-size:.82rem;color:var(--danger);min-height:1.2em}
+.form-actions{grid-column:1/-1;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+/* lista */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th{text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.r,th.r{text-align:right}
+tr.editing td{background:var(--soft)}
+.empty{border:1px dashed var(--line);border-radius:10px;padding:22px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--fg);font-family:var(--f-display);font-size:1.1rem;margin-bottom:4px}
+.confirm{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:.85rem}
+/* prévia A4 */
+.preview-panel{position:sticky;top:16px}
+@media (max-width:900px){.preview-panel{position:static}}
+.sheet{background:#fff;color:#1a1a1a;border:1px solid var(--line);border-radius:4px;padding:28px 26px;font-size:11.5px;line-height:1.45;box-shadow:0 6px 24px rgba(10,30,28,.12);aspect-ratio:210/297;overflow:hidden;display:flex;flex-direction:column;gap:12px;max-width:100%}
+.sheet .sh-head{display:flex;align-items:center;gap:14px;border-bottom:2px solid #f5b400;padding-bottom:8px}.sheet .sh-head img{height:44px;width:auto}
+.sheet h3{font-size:15px;color:#3a3a37;font-family:var(--f-display);line-height:1.2}
+.sheet .meta{display:grid;grid-template-columns:1fr 1fr;gap:3px 16px}
+.sheet .meta span{color:#666}
+.sheet table{font-size:10.5px}
+.sheet th{color:#444;border-bottom:1px solid #999;padding:4px}
+.sheet td{border-bottom:1px solid #e2e2e2;padding:4px}
+.sheet .tot td{font-weight:700;border-top:1.5px solid #333;border-bottom:none}
+.sheet .decl{font-size:10.5px;color:#333}
+.sheet .sigs{margin-top:auto;display:flex;justify-content:center}.sheet .sigs .sig{width:60%}
+.sheet .sig{border-top:1px solid #333;padding-top:4px;text-align:center;font-size:10.5px}
+.sheet .sig small{display:block;color:#666}
+.dl-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.attach{grid-column:1/-1;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px dashed var(--line);border-radius:10px;padding:10px 12px}
+.attach.drag{border-color:var(--brand);background:var(--soft)}
+.attach .clip{display:inline-flex;align-items:center;gap:8px}
+.att-thumb{width:46px;height:46px;border-radius:6px;object-fit:cover;border:1px solid var(--line);background:#fff}
+.att-name{font-size:.85rem;min-width:0;overflow-wrap:anywhere}
+.icon-btn{display:inline-flex;align-items:center;gap:4px;border:none;background:none;padding:4px 6px;color:var(--fg);vertical-align:middle}
+.icon-btn:hover{color:var(--accent)}
+.nocupom{font-size:.75rem;color:var(--amber)}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:.88rem;cursor:pointer}
+.chk input{width:auto}
+.att-pages{display:none}
+.status.warn{color:var(--amber)}
+.status{font-size:.82rem;color:var(--muted)}
+details.cfg summary{cursor:pointer;font-weight:600;color:var(--accent)}
+details.cfg[open] summary{margin-bottom:12px}
+@media print{
+  .att-pages{display:block}
+  .att-page{page-break-before:always;break-before:page;width:210mm;height:297mm;padding:14mm 16mm;display:flex;flex-direction:column;gap:6mm;font-family:var(--f-body);color:#1a1a1a}
+  .att-page header{border-bottom:2px solid #f5b400;padding-bottom:3mm;font-size:10.5pt}
+  .att-page header b{font-family:var(--f-display);font-size:13pt;display:block}
+  .att-page .img{flex:1;min-height:0;display:flex;align-items:flex-start;justify-content:center}
+  .att-page img{max-width:100%;max-height:100%;object-fit:contain}
+  @page{size:A4;margin:0}
+  body{background:#fff;padding:0}
+  .wrap>header,.tabs,.ro-banner,.col:not(.preview-panel),#view-admin,.panel-head,.dl-row,#syncMsg,.backup{display:none!important}
+  .wrap,.grid,.col,.panel{display:block;border:none;padding:0;margin:0;max-width:none;background:#fff;position:static}
+  .sheet{box-shadow:none;border:none;border-radius:0;width:210mm;height:297mm;aspect-ratio:auto;padding:16mm 16mm 18mm;font-size:11pt}
+  .sheet table{font-size:10pt}.sheet .decl,.sheet .sig{font-size:10pt}
+}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+
+/* ---- web: login, abas, administração ---- */
+.auth{min-height:calc(100vh - 80px);display:grid;place-items:center}
+.auth-card{width:100%;max-width:400px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:14px}
+.auth-card .logo-chip{align-self:flex-start}
+.auth-card form{grid-template-columns:1fr}
+.auth-card .f input{padding:11px 12px;font-size:16px}
+.auth-card .links{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.auth-card p{margin:0}
+.msg-ok{font-size:.88rem;color:var(--ok)}
+.userbox{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.userbox .who{font-size:.85rem;color:var(--muted);text-align:right}
+.userbox .who b{color:var(--fg);display:block}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tabs button{border:none;border-bottom:3px solid transparent;border-radius:0;background:none;padding:10px 14px;color:var(--muted)}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--brand)}
+.ro-banner{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--brand);color:#1d1d1b;border-radius:10px;padding:10px 14px;font-weight:600}
+.ro-banner button{background:#1d1d1b;color:#fff;border-color:#1d1d1b}
+.sync{font-size:.78rem;font-weight:600;color:var(--amber)}
+.cam-row{display:flex;gap:8px;flex-wrap:wrap}
+.adm-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.adm-form{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;align-items:end}
+@media (max-width:560px){.adm-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tag{display:inline-block;font-size:.72rem;font-weight:600;border-radius:99px;padding:1px 8px;border:1px solid currentColor}
+.tag.adm{color:var(--accent)} .tag.off{color:var(--danger)} .tag.on{color:var(--ok)}
+.ok-txt{color:var(--ok)} .warn-txt{color:var(--amber)} .bad-txt{color:var(--danger)}
+.wait{display:grid;place-items:center;min-height:60vh;color:var(--muted)}
+
+dialog.viewer{border:none;border-radius:12px;padding:0;max-width:min(96vw,900px);width:100%;background:var(--surface);color:var(--fg)}
+dialog.viewer::backdrop{background:rgba(0,0,0,.6)}
+dialog.viewer .vh{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+dialog.viewer .vb{max-height:80vh;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px;align-items:center}
+dialog.viewer img{max-width:100%;height:auto;background:#fff}
+</style>
+</head>
+<body>
+<div id="view-wait" class="wait">Carregando…</div>
+
+<!-- ============ LOGIN ============ -->
+<div id="view-auth" class="auth" hidden>
+  <div class="auth-card">
+    <span class="logo-chip"><img src="icons/logo.png" alt="Gera Center"></span>
+    <div><div class="label">Cartão corporativo · combustível</div><h1>Relatório de Gasolina</h1></div>
+
+    <form id="fLogin" novalidate>
+      <div class="f"><label class="label" for="lEmail">E-mail</label><input id="lEmail" type="email" autocomplete="username" inputmode="email"></div>
+      <div class="f"><label class="label" for="lSenha">Senha</label><input id="lSenha" type="password" autocomplete="current-password"></div>
+      <div class="err" id="lErr" role="alert"></div>
+      <button class="primary" type="submit" id="btnEntrar">Entrar</button>
+      <div class="links"><button type="button" class="link" data-mode="signup">Primeiro acesso</button><button type="button" class="link" data-mode="reset">Esqueci a senha</button></div>
+    </form>
+
+    <form id="fSignup" novalidate hidden>
+      <p>Use o e-mail que o administrador liberou para você e crie sua senha.</p>
+      <div class="f"><label class="label" for="sEmail">E-mail</label><input id="sEmail" type="email" autocomplete="username" inputmode="email"></div>
+      <div class="f"><label class="label" for="sSenha">Crie uma senha (mínimo 8 caracteres)</label><input id="sSenha" type="password" autocomplete="new-password"></div>
+      <div class="f"><label class="label" for="sSenha2">Repita a senha</label><input id="sSenha2" type="password" autocomplete="new-password"></div>
+      <div class="err" id="sErr" role="alert"></div>
+      <button class="primary" type="submit">Criar acesso</button>
+      <div class="links"><button type="button" class="link" data-mode="login">Já tenho senha</button></div>
+    </form>
+
+    <form id="fReset" novalidate hidden>
+      <p>Informe seu e-mail. Você vai receber um link para criar uma senha nova.</p>
+      <div class="f"><label class="label" for="rEmail">E-mail</label><input id="rEmail" type="email" autocomplete="username" inputmode="email"></div>
+      <div class="err" id="rErr" role="alert"></div><div class="msg-ok" id="rOk"></div>
+      <button class="primary" type="submit">Enviar link</button>
+      <div class="links"><button type="button" class="link" data-mode="login">Voltar para o login</button></div>
+    </form>
+
+    <div id="pVerify" hidden>
+      <p>Enviamos um e-mail de confirmação para <b id="vEmail"></b>. Abra o e-mail, clique no link e depois toque em <b>Já confirmei</b>.</p>
+      <p class="hint">Não chegou? Procure também na caixa de spam ou lixo eletrônico.</p>
+      <div class="err" id="vErr" role="alert"></div><div class="msg-ok" id="vOk"></div>
+      <div class="form-actions"><button class="primary" id="btnVerificado">Já confirmei</button><button id="btnReenviar">Reenviar e-mail</button><button class="link" data-sair>Sair</button></div>
+    </div>
+
+    <div id="pBlocked" hidden>
+      <p>O e-mail <b id="bEmail"></b> ainda não está liberado para usar o sistema. Peça ao administrador para liberar o seu acesso.</p>
+      <div class="form-actions"><button class="primary" id="btnTentar">Tentar de novo</button><button class="link" data-sair>Sair</button></div>
+    </div>
+
+    <div id="pNoConfig" hidden>
+      <p class="bad-txt"><b>Sistema ainda não configurado.</b> Falta colar a configuração do Firebase no arquivo <code>config.js</code>.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SISTEMA ============ -->
+<div class="wrap" id="view-app" hidden>
+  <header class="top">
+    <div class="brandrow"><span class="logo-chip"><img src="icons/logo.png" alt="Gera Center"></span><div>
+      <div class="label">Cartão corporativo · combustível</div>
+      <h1>Relatório de Gasolina <span class="ver" id="appVer"></span></h1>
+    </div></div>
+    <div class="cycle" role="group" aria-label="Ciclo da fatura">
+      <button id="prev" aria-label="Ciclo anterior">‹</button>
+      <div class="cyc-txt"><b id="cycTitle">—</b><span id="cycRange" class="num">—</span></div>
+      <button id="next" aria-label="Próximo ciclo">›</button>
+    </div>
+    <div class="userbox"><div class="who"><b id="whoName">—</b><span id="whoEmail"></span></div><button data-sair>Sair</button></div>
+  </header>
+
+  <nav class="tabs" id="tabs" role="tablist" hidden>
+    <button role="tab" id="tabMine" aria-selected="true">Meus lançamentos</button>
+    <button role="tab" id="tabAdmin" aria-selected="false">Administração</button>
+  </nav>
+
+  <div class="ro-banner" id="roBanner" hidden><span id="roTxt">Visualizando</span><button id="btnRoBack">Voltar para a administração</button></div>
+
+  <div class="grid" id="view-main">
+    <div class="col">
+      <section class="panel" aria-labelledby="h-gauge">
+        <div class="panel-head"><h2 id="h-gauge">Limite do ciclo</h2><span id="pill" class="pill ok">Dentro do limite</span></div>
+        <div class="gauge">
+          <div class="gauge-nums"><span class="label">Gasto</span><span class="big num" id="gSpent">R$ 0,00</span><small class="num" id="gOf">de R$ 500,00</small></div>
+          <div>
+            <div class="bar" id="bar"><i id="barFill" style="width:0%"></i></div>
+            <div class="ticks"><span>E</span><span>¼</span><span>½</span><span>¾</span><span>F</span></div>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat"><span class="label">Saldo</span><b class="num" id="sSaldo">R$ 500,00</b></div>
+          <div class="stat"><span class="label">Litros</span><b class="num" id="sLitros">0,00 L</b></div>
+          <div class="stat"><span class="label">Preço médio</span><b class="num" id="sMedio">—</b></div>
+        </div>
+        <div class="hint" id="daysLeft"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-form" id="formPanel">
+        <div class="panel-head"><h2 id="h-form">Novo abastecimento</h2></div>
+        <form id="form" novalidate>
+          <div class="f s2 s1h"><label class="label" for="iData">Data</label><input type="date" id="iData" required></div>
+          <div class="f s4"><label class="label" for="iPosto">Posto</label><input id="iPosto" placeholder="Ex.: Posto Ipiranga Av. Brasil" autocomplete="off" list="postos"><datalist id="postos"></datalist></div>
+          <div class="f s2 s1h"><label class="label" for="iComb">Combustível</label>
+            <select id="iComb"><option>Gasolina comum</option><option>Gasolina aditivada</option></select></div>
+          <div class="f s2 s1h"><label class="label" for="iLitros">Litros</label><input id="iLitros" inputmode="decimal" placeholder="0,000" autocomplete="off"></div>
+          <div class="f s2 s1h"><label class="label" for="iValor">Valor (R$)</label><input id="iValor" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+          <div class="f s3 s1h"><label class="label" for="iKm">Km do veículo</label><input id="iKm" inputmode="numeric" placeholder="Opcional" autocomplete="off"></div>
+          <div class="f s3 s1h"><label class="label" for="iNf">Nº cupom / NF</label><input id="iNf" placeholder="Opcional" autocomplete="off"></div>
+          <div class="attach" id="attBox">
+            <div class="cam-row">
+              <button type="button" class="clip" id="btnCam"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg> Tirar foto</button>
+              <button type="button" class="clip" id="btnClip"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 01-8.5-8.5l9.2-9.2a4 4 0 015.7 5.7l-9.2 9.2a2 2 0 01-2.8-2.8l8.5-8.5"/></svg> Anexar arquivo</button>
+            </div>
+            <img class="att-thumb" id="attThumb" alt="" hidden>
+            <span class="att-name" id="attName"><span class="hint">Foto do cupom fiscal (JPG, PNG) ou PDF. No computador, também dá para arrastar o arquivo aqui.</span></span>
+            <button type="button" class="link danger" id="btnAttDel" hidden>Remover</button>
+            <input type="file" id="camFile" accept="image/*" capture="environment" hidden>
+            <input type="file" id="attFile" accept="image/jpeg,image/png,image/heic,image/*,application/pdf,.pdf" hidden>
+          </div>
+          <div class="err s6" id="formErr" role="alert"></div>
+          <div class="form-actions">
+            <button class="primary" type="submit" id="btnSave">Adicionar</button>
+            <button type="button" id="btnCancel" hidden>Cancelar edição</button>
+            <span class="hint" id="ppl"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="h-list">
+        <div class="panel-head"><h2 id="h-list">Lançamentos do ciclo</h2><span class="hint num" id="count"></span></div>
+        <div id="list"></div>
+      </section>
+
+      <section class="panel" id="cfgPanel">
+        <details class="cfg" id="cfg">
+          <summary>Meus dados para o relatório</summary>
+          <form id="pform" novalidate>
+            <div class="f s3"><label class="label" for="pNome">Nome completo</label><input id="pNome" placeholder="Como vai assinar o relatório"></div>
+            <div class="f s3"><label class="label" for="pCargo">Cargo / Departamento</label><input id="pCargo"></div>
+            <div class="f s3"><label class="label" for="pEmissor">Cartão (banco / bandeira)</label><input id="pEmissor" placeholder="Ex.: Itaú Mastercard"></div>
+            <div class="f s3"><label class="label" for="pCartao">Cartão (final)</label><input id="pCartao" inputmode="numeric" maxlength="4" placeholder="4 dígitos"></div>
+            <div class="f s3"><label class="label" for="pPlaca">Veículo / placa</label><input id="pPlaca"></div>
+            <div class="f s3"><label class="label" for="pEmpresa">Empresa</label><input id="pEmpresa"></div>
+            <div class="f s3"><label class="label" for="pLimite">Limite mensal (R$)</label><input id="pLimite" inputmode="decimal"></div>
+            <div class="f s3"><label class="label" for="pFech">Dia de fechamento</label><input id="pFech" inputmode="numeric"></div>
+            <div class="form-actions"><button class="primary" type="submit">Salvar dados</button><span class="hint" id="pMsg"></span></div>
+          </form>
+        </details>
+        <details class="cfg" id="impBox">
+          <summary>Trazer lançamentos do programa antigo (Windows)</summary>
+          <p class="hint">Escolha a pasta <b>Relatório de Gasolina</b> (a que tem o arquivo dados.json e a pasta comprovantes). Os lançamentos e os cupons são copiados para cá. Pode repetir sem medo: nada é duplicado.</p>
+          <div class="dl-row"><button id="btnImp">Escolher a pasta…</button><span class="hint" id="impMsg"></span></div>
+          <input type="file" id="impDir" webkitdirectory directory multiple hidden>
+        </details>
+      </section>
+    </div>
+
+    <div class="col preview-panel">
+      <section class="panel" aria-labelledby="h-prev">
+        <div class="panel-head"><h2 id="h-prev">Relatório</h2><span class="hint">Prévia da folha A4 que será impressa</span></div>
+        <div class="sheet" id="sheet"></div>
+        <div class="dl-row">
+          <label class="chk"><input type="checkbox" id="incAtt" checked> Incluir comprovantes</label>
+          <button class="primary" id="btnPrint">Imprimir</button>
+          <button id="btnPdf">Salvar PDF</button>
+          <span class="status" id="pdfMsg"></span>
+        </div>
+        <div class="status" id="syncMsg"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ ADMINISTRAÇÃO ============ -->
+  <div class="adm-grid" id="view-admin" hidden>
+    <section class="panel" aria-labelledby="h-rep">
+      <div class="panel-head"><h2 id="h-rep">Relatórios do ciclo</h2><span class="hint" id="repHint"></span></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Funcionário</th><th class="r">Lançamentos</th><th class="r">Total</th><th class="r">Sem cupom</th><th>Situação</th><th></th></tr></thead><tbody id="repBody"><tr><td colspan="6" class="hint">Carregando…</td></tr></tbody></table></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-fun">
+      <div class="panel-head"><h2 id="h-fun">Funcionários com acesso</h2><span class="hint" id="funCount"></span></div>
+      <form class="adm-form" id="fConv" novalidate>
+        <div class="f s2"><label class="label" for="cEmail">E-mail</label><input id="cEmail" type="email" placeholder="nome@empresa.com.br"></div>
+        <div class="f s2"><label class="label" for="cNome">Nome</label><input id="cNome"></div>
+        <label class="chk s1h"><input type="checkbox" id="cAdmin"> Administrador</label>
+        <button class="primary" type="submit">Liberar acesso</button>
+        <div class="err s6" id="cErr" role="alert"></div>
+      </form>
+      <p class="hint">Depois de liberar, avise a pessoa para abrir este site e tocar em <b>Primeiro acesso</b> com o mesmo e-mail.</p>
+      <div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Situação</th><th></th></tr></thead><tbody id="convBody"></tbody></table></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-exp">
+      <div class="panel-head"><h2 id="h-exp">Exportar</h2></div>
+      <div class="dl-row">
+        <button id="btnCsv">Planilha do ciclo (Excel)</button>
+        <button id="btnBkData">Backup dos dados</button>
+        <button id="btnBkFull">Backup completo com fotos</button>
+      </div>
+      <p class="hint">O plano gratuito do Firebase não faz cópia de segurança automática. Baixe o <b>backup completo</b> uma vez por mês e guarde no OneDrive.</p>
+      <div class="status" id="expMsg"></div>
+    </section>
+  </div>
+</div>
+
+<dialog class="viewer" id="viewer"><div class="vh"><b id="vTitle">Cupom</b><button id="vClose">Fechar</button></div><div class="vb" id="vBody"></div></dialog>
+<div class="att-pages" id="attPages"></div>
+
+<script src="config.js"></script>
+<script src="lib/firebase-app-compat.js"></script>
+<script src="lib/firebase-auth-compat.js"></script>
+<script src="lib/firebase-firestore-compat.js"></script>
+<script src="lib/jspdf.umd.min.js"></script>
+<script src="lib/jspdf.plugin.autotable.min.js"></script>
+<script src="lib/pdf.min.js"></script>
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

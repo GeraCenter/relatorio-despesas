@@ -1,0 +1,627 @@
+(function () {
+'use strict';
+const APPVER = '2.0.0';
+const $ = id => document.getElementById(id);
+const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const brl = v => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const n2 = (v, d = 2) => (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+const parseNum = s => { if (s == null) return NaN; s = String(s).trim().replace(/\s|R\$/g, ''); if (!s) return NaN; if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.'); return Number(s); };
+const pad = x => String(x).padStart(2, '0');
+const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const fromIso = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const br = s => { const [y, m, d] = s.split('-'); return d + '/' + m + '/' + y; };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const hhmm = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const CLIP = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 01-8.5-8.5l9.2-9.2a4 4 0 015.7 5.7l-9.2 9.2a2 2 0 01-2.8-2.8l8.5-8.5"/></svg>';
+$('appVer').textContent = 'v' + APPVER;
+
+function show(view) { ['view-wait', 'view-auth', 'view-app'].forEach(v => $(v).hidden = v !== view); }
+
+// ======================================================================
+// Estado
+// ======================================================================
+const DEF = { nome: '', cargo: '', emissor: '', cartao: '', placa: '', empresa: 'Gera Center', limite: 500, fech: 25 };
+let me = null;             // { uid, email }
+let myProfile = { ...DEF };
+let isAdmin = false;
+let viewUid = null;         // de quem é o relatório na tela
+let profile = { ...DEF };   // perfil do relatório na tela
+let lancs = [];
+let unsub = null;
+let editingId = null, confirmId = null;
+let LOGO = null;
+const readOnly = () => viewUid !== (me && me.uid);
+
+// ciclo: fecha no dia F; começa no dia F+1 do mês anterior
+function cycleKeyFor(date, F = profile.fech) { let y = date.getFullYear(), m = date.getMonth(); if (date.getDate() > F) { m++; if (m > 11) { m = 0; y++; } } return y + '-' + pad(m + 1); }
+function cycleRange(key, F = profile.fech) { const [y, m] = key.split('-').map(Number); return { start: new Date(y, m - 2, F + 1), end: new Date(y, m - 1, F) }; }
+function shiftKey(key, d) { let [y, m] = key.split('-').map(Number); m += d; while (m > 12) { m -= 12; y++; } while (m < 1) { m += 12; y--; } return y + '-' + pad(m); }
+let curKey = cycleKeyFor(new Date(), 25);
+function items() { return lancs.slice().sort((a, b) => a.data.localeCompare(b.data) || String(a.id).localeCompare(String(b.id))); }
+
+function status(t, warn) { $('syncMsg').textContent = t; $('syncMsg').classList.toggle('warn', !!warn); }
+const errMsg = e => {
+  const c = e && e.code || '';
+  if (c === 'permission-denied') return 'Sem permissão para essa ação.';
+  if (c === 'unavailable') return 'Sem conexão com o servidor. Tentando de novo…';
+  if (c === 'resource-exhausted') return 'Limite diário do plano gratuito atingido. Tente amanhã.';
+  return (e && e.message) || String(e);
+};
+
+// ======================================================================
+// Login
+// ======================================================================
+function authMode(mode) {
+  ['fLogin', 'fSignup', 'fReset', 'pVerify', 'pBlocked', 'pNoConfig'].forEach(id => $(id).hidden = true);
+  ({ login: 'fLogin', signup: 'fSignup', reset: 'fReset', verify: 'pVerify', blocked: 'pBlocked', noconfig: 'pNoConfig' })[mode] && ($({ login: 'fLogin', signup: 'fSignup', reset: 'fReset', verify: 'pVerify', blocked: 'pBlocked', noconfig: 'pNoConfig' }[mode]).hidden = false);
+  ['lErr', 'sErr', 'rErr', 'rOk', 'vErr', 'vOk'].forEach(id => $(id).textContent = '');
+  show('view-auth');
+}
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+  const m = b.dataset.mode; const e = ($('lEmail').value || $('sEmail').value || $('rEmail').value).trim();
+  ['lEmail', 'sEmail', 'rEmail'].forEach(id => { if (!$(id).value) $(id).value = e; });
+  authMode(m);
+}));
+document.querySelectorAll('[data-sair]').forEach(b => b.addEventListener('click', () => Store.sair()));
+
+const authErr = e => {
+  const c = e && e.code || '';
+  return ({
+    'auth/invalid-email': 'E-mail inválido.',
+    'auth/user-not-found': 'E-mail ou senha incorretos.',
+    'auth/wrong-password': 'E-mail ou senha incorretos.',
+    'auth/invalid-credential': 'E-mail ou senha incorretos. Se é o seu primeiro acesso, use "Primeiro acesso".',
+    'auth/invalid-login-credentials': 'E-mail ou senha incorretos. Se é o seu primeiro acesso, use "Primeiro acesso".',
+    'auth/email-already-in-use': 'Esse e-mail já tem senha. Use "Entrar" ou "Esqueci a senha".',
+    'auth/weak-password': 'Senha fraca. Use pelo menos 8 caracteres.',
+    'auth/too-many-requests': 'Muitas tentativas. Espere alguns minutos e tente de novo.',
+    'auth/network-request-failed': 'Sem internet. Verifique a conexão.',
+    'auth/missing-email': 'Informe o e-mail.'
+  })[c] || ('Não deu certo: ' + ((e && e.message) || e));
+};
+$('fLogin').addEventListener('submit', async e => {
+  e.preventDefault(); $('lErr').textContent = '';
+  const em = $('lEmail').value.trim(), s = $('lSenha').value;
+  if (!em || !s) { $('lErr').textContent = 'Informe e-mail e senha.'; return; }
+  $('btnEntrar').disabled = true;
+  try { await Store.entrar(em, s); } catch (x) { $('lErr').textContent = authErr(x); } finally { $('btnEntrar').disabled = false; }
+});
+$('fSignup').addEventListener('submit', async e => {
+  e.preventDefault(); $('sErr').textContent = '';
+  const em = $('sEmail').value.trim(), s = $('sSenha').value, s2 = $('sSenha2').value;
+  if (!em) { $('sErr').textContent = 'Informe o e-mail.'; return; }
+  if (s.length < 8) { $('sErr').textContent = 'A senha precisa ter pelo menos 8 caracteres.'; return; }
+  if (s !== s2) { $('sErr').textContent = 'As duas senhas não são iguais.'; return; }
+  try { await Store.criarConta(em, s); } catch (x) { $('sErr').textContent = authErr(x); }
+});
+$('fReset').addEventListener('submit', async e => {
+  e.preventDefault(); $('rErr').textContent = ''; $('rOk').textContent = '';
+  const em = $('rEmail').value.trim(); if (!em) { $('rErr').textContent = 'Informe o e-mail.'; return; }
+  try { await Store.esqueciSenha(em); $('rOk').textContent = 'Se esse e-mail tiver acesso, o link chega em alguns minutos. Veja também o spam.'; }
+  catch (x) { if (x && x.code === 'auth/user-not-found') $('rOk').textContent = 'Se esse e-mail tiver acesso, o link chega em alguns minutos. Veja também o spam.'; else $('rErr').textContent = authErr(x); }
+});
+$('btnVerificado').addEventListener('click', async () => {
+  $('vErr').textContent = '';
+  try { if (await Store.confirmarVerificacao()) entrarNoSistema({ uid: me.uid, email: me.email }); else $('vErr').textContent = 'Ainda não aparece como confirmado. Clique no link do e-mail e tente de novo.'; }
+  catch (x) { $('vErr').textContent = authErr(x); }
+});
+$('btnReenviar').addEventListener('click', async () => {
+  try { await Store.reenviarConfirmacao(); $('vOk').textContent = 'E-mail reenviado.'; } catch (x) { $('vErr').textContent = authErr(x); }
+});
+$('btnTentar').addEventListener('click', () => me && entrarNoSistema(me));
+
+// ======================================================================
+// Entrada no sistema
+// ======================================================================
+async function entrarNoSistema(u) {
+  me = { uid: u.uid, email: u.email };
+  show('view-wait');
+  let conv = null, semRede = false;
+  try { conv = await Store.meuConvite(u.email); }
+  catch (e) { // sem internet na abertura: segue com o que estiver guardado no aparelho
+    semRede = true;
+    conv = (() => { try { return JSON.parse(localStorage.getItem('rg.conv.' + u.uid) || 'null'); } catch (_) { return null; } })();
+  }
+  if (!conv || !conv.ativo) {
+    $('bEmail').textContent = u.email; authMode('blocked');
+    $('pBlocked').querySelector('p').innerHTML = semRede
+      ? 'Não consegui confirmar o acesso de <b>' + esc(u.email) + '</b> porque o aparelho está sem internet. Conecte e toque em Tentar de novo.'
+      : 'O e-mail <b>' + esc(u.email) + '</b> ainda não está liberado para usar o sistema. Peça ao administrador para liberar o seu acesso.';
+    return;
+  }
+  try { localStorage.setItem('rg.conv.' + u.uid, JSON.stringify({ ativo: conv.ativo, admin: !!conv.admin })); } catch (_) {}
+  isAdmin = !!conv.admin;
+  let p = null;
+  try { p = await Store.perfil(u.uid); } catch (_) {}
+  let novoPerfil = false;
+  if (!p) { novoPerfil = true; p = { ...DEF, nome: conv.nome || '', email: u.email }; Store.salvarPerfil(u.uid, p).catch(e => status('Não consegui salvar seus dados: ' + errMsg(e), true)); }
+  myProfile = { ...DEF, ...p, email: u.email };
+  $('whoName').textContent = myProfile.nome || u.email; $('whoEmail').textContent = myProfile.nome ? u.email : '';
+  $('tabs').hidden = !isAdmin;
+  curKey = cycleKeyFor(new Date(), myProfile.fech);
+  abrirMeus();
+  show('view-app');
+  if (novoPerfil || !myProfile.nome) { $('cfg').open = true; $('pMsg').textContent = 'Primeiro acesso: preencha seus dados e clique em Salvar dados. Eles aparecem no relatório.'; }
+}
+
+function abrirMeus() {
+  viewUid = me.uid; profile = myProfile;
+  $('tabMine').setAttribute('aria-selected', 'true'); $('tabAdmin').setAttribute('aria-selected', 'false');
+  $('view-main').hidden = false; $('view-admin').hidden = true; $('roBanner').hidden = true;
+  $('formPanel').hidden = false; $('cfgPanel').hidden = false;
+  fillProfileForm(); resetForm(); assinar();
+}
+function abrirDeOutro(u) {
+  viewUid = u.uid; profile = { ...DEF, ...u };
+  $('view-main').hidden = false; $('view-admin').hidden = true; $('roBanner').hidden = false;
+  $('roTxt').textContent = 'Relatório de ' + (u.nome || u.email) + ' — somente leitura';
+  $('formPanel').hidden = true; $('cfgPanel').hidden = true;
+  editingId = null; confirmId = null; assinar(); window.scrollTo({ top: 0 });
+}
+$('tabMine').addEventListener('click', abrirMeus);
+$('tabAdmin').addEventListener('click', abrirAdmin);
+$('btnRoBack').addEventListener('click', abrirAdmin);
+
+function assinar() {
+  if (unsub) { unsub(); unsub = null; }
+  lancs = []; render();
+  const { start, end } = cycleRange(curKey);
+  unsub = Store.ouvirLancamentos(viewUid, iso(start), iso(end), (list, doCache) => {
+    lancs = list; render();
+    const pend = list.filter(x => x.pendente).length;
+    if (pend) status(pend + ' lançamento' + (pend > 1 ? 's' : '') + ' aguardando internet para sincronizar.', true);
+    else status(doCache ? 'Sem conexão: mostrando o que está guardado no aparelho.' : 'Tudo sincronizado.', doCache);
+  }, e => status('Não consegui carregar os lançamentos: ' + errMsg(e), true));
+}
+
+function ligarLogin() { Store.aoMudarLogin(u => {
+  if (unsub) { unsub(); unsub = null; }
+  if (!u) { me = null; authMode('login'); return; }
+  me = { uid: u.uid, email: u.email };
+  if (!u.verificado) { $('vEmail').textContent = u.email; authMode('verify'); return; }
+  entrarNoSistema(u);
+}); }
+
+// ======================================================================
+// Tela principal
+// ======================================================================
+function totals() {
+  const it = items(); const tot = it.reduce((s, x) => s + x.valor, 0); const lit = it.reduce((s, x) => s + (x.litros || 0), 0);
+  const litComValor = it.filter(x => x.litros).reduce((s, x) => s + x.valor, 0); return { it, tot, lit, medio: lit ? litComValor / lit : 0 };
+}
+function render() {
+  const { start, end } = cycleRange(curKey); const [y, m] = curKey.split('-').map(Number);
+  $('cycTitle').textContent = 'Fatura ' + MESES[m - 1] + '/' + y;
+  $('cycRange').textContent = br(iso(start)) + ' a ' + br(iso(end));
+  $('iData').min = iso(start); $('iData').max = iso(end);
+  const { it, tot, lit, medio } = totals(); const L = profile.limite; const pct = L ? tot / L : 0;
+  $('gSpent').textContent = brl(tot); $('gOf').textContent = 'de ' + brl(L);
+  $('barFill').style.width = Math.min(100, pct * 100) + '%';
+  const bar = $('bar'); bar.classList.toggle('warn', pct >= .85 && pct <= 1); bar.classList.toggle('over', pct > 1);
+  const pill = $('pill'); pill.className = 'pill ' + (pct > 1 ? 'over' : pct >= .85 ? 'warn' : 'ok');
+  pill.textContent = pct > 1 ? 'Acima do limite' : pct >= .85 ? 'Perto do limite' : 'Dentro do limite';
+  const saldo = L - tot; $('sSaldo').textContent = brl(saldo); $('sSaldo').style.color = saldo < 0 ? 'var(--danger)' : '';
+  $('sLitros').textContent = n2(lit) + ' L'; $('sMedio').textContent = medio ? brl(medio) + '/L' : '—';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (today >= start && today <= end) { const dl = Math.round((end - today) / 864e5); $('daysLeft').textContent = dl === 0 ? 'A fatura fecha hoje.' : 'Faltam ' + dl + ' dia' + (dl > 1 ? 's' : '') + ' para o fechamento (' + br(iso(end)) + ').'; }
+  else $('daysLeft').textContent = today > end ? 'Ciclo encerrado.' : 'Ciclo futuro.';
+  $('count').textContent = it.length ? it.length + ' lançamento' + (it.length > 1 ? 's' : '') : '';
+  const postos = [...new Set(it.map(x => x.posto))]; $('postos').innerHTML = postos.map(p => '<option value="' + esc(p) + '">').join('');
+  renderList(it); renderSheet(it, tot, lit);
+}
+function renderList(it) {
+  const ro = readOnly();
+  if (!it.length) { $('list').innerHTML = '<div class="empty"><b>Nenhum abastecimento neste ciclo</b>' + (ro ? 'Este funcionário ainda não lançou nada neste ciclo.' : 'Preencha o formulário acima com a data, o posto e o valor. No celular, toque em <b>Tirar foto</b> para anexar o cupom.') + '</div>'; return; }
+  let h = '<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Posto</th><th class="r">Litros</th><th class="r">Valor</th><th></th></tr></thead><tbody>';
+  it.forEach(x => {
+    h += '<tr class="' + (x.id === editingId ? 'editing' : '') + '"><td class="num">' + br(x.data) + '</td><td>' + esc(x.posto) + '<div class="hint">' + esc(x.comb) + (x.nf ? ' · NF ' + esc(x.nf) : '') + (x.km ? ' · ' + esc(x.km) + ' km' : '') + '</div>' +
+      (x.cupom ? '' : '<div class="nocupom">sem cupom anexado</div>') + (x.pendente ? '<div class="sync">aguardando sincronizar</div>' : '') +
+      '</td><td class="r num">' + (x.litros ? n2(x.litros, 3) : '—') + '</td><td class="r num">' + brl(x.valor) + '</td><td class="r">';
+    if (confirmId === x.id) h += '<span class="confirm">Excluir? <button class="link danger" data-act="del" data-id="' + x.id + '">Sim</button><button class="link" data-act="nodel">Não</button></span>';
+    else h += (x.cupom ? '<button class="icon-btn" data-act="view" data-id="' + x.id + '" title="Ver cupom" aria-label="Ver cupom">' + CLIP + '</button>' : '') +
+      (ro ? '' : '<button class="link" data-act="edit" data-id="' + x.id + '">Editar</button><button class="link danger" data-act="ask" data-id="' + x.id + '">Excluir</button>');
+    h += '</td></tr>';
+  });
+  $('list').innerHTML = h + '</tbody></table></div>';
+}
+function cardTxt() { const p = profile; return [p.emissor, p.cartao ? 'final ' + p.cartao : ''].filter(Boolean).join(' · ') || '—'; }
+function periodText() { const { start, end } = cycleRange(curKey); return br(iso(start)) + ' a ' + br(iso(end)); }
+function refMonth() { const [y, m] = curKey.split('-').map(Number); return MESES_L[m - 1] + '/' + y; }
+const DECL_BASE = 'Declaro que as despesas acima foram realizadas com o cartão de crédito corporativo exclusivamente para abastecimento de gasolina em atividades a serviço da empresa, e que os comprovantes seguem anexos.';
+let DECL = DECL_BASE;
+function renderSheet(it, tot, lit) {
+  const p = profile; const L = p.limite;
+  let rows = it.map((x, i) => '<tr><td>' + (i + 1) + '</td><td>' + br(x.data) + '</td><td>' + esc(x.posto) + '</td><td>' + esc(x.nf || '—') + '</td><td class="r">' + (x.litros ? n2(x.litros, 3) : '—') + '</td><td class="r">' + brl(x.valor) + '</td></tr>').join('');
+  if (!rows) rows = '<tr><td colspan="6" style="color:#888;text-align:center;padding:14px">Sem lançamentos neste ciclo</td></tr>';
+  $('sheet').innerHTML =
+    '<div class="sh-head"><img src="icons/logo.png" alt="Gera Center"><h3>Relatório de Despesas<br>Cartão Corporativo · Combustível</h3></div>' +
+    '<div class="meta num"><div><span>Colaborador:</span> ' + esc(p.nome || '________________') + '</div><div><span>Empresa:</span> ' + esc(p.empresa || '—') + '</div>' +
+    '<div><span>Cargo/Depto:</span> ' + esc(p.cargo || '—') + '</div>' +
+    '<div><span>Cartão:</span> ' + esc(cardTxt()) + '</div><div><span>Veículo:</span> ' + esc(p.placa || '—') + '</div>' +
+    '<div><span>Fatura:</span> ' + refMonth() + '</div><div><span>Período:</span> ' + periodText() + '</div></div>' +
+    '<table class="num"><thead><tr><th>#</th><th>Data</th><th>Posto</th><th>Cupom/NF</th><th class="r">Litros</th><th class="r">Valor</th></tr></thead><tbody>' + rows +
+    '<tr class="tot"><td colspan="4">Total</td><td class="r">' + n2(lit, 3) + '</td><td class="r">' + brl(tot) + '</td></tr></tbody></table>' +
+    '<div class="meta num"><div><span>Limite do ciclo:</span> ' + brl(L) + '</div><div><span>Saldo:</span> ' + brl(L - tot) + (tot > L ? ' (excedido)' : '') + '</div></div>' +
+    '<div class="decl">' + DECL + '</div>' +
+    '<div class="sigs"><div class="sig">' + (esc(p.nome) || '&nbsp;') + '<small>Data ___/___/____</small></div></div>';
+}
+$('prev').addEventListener('click', () => { curKey = shiftKey(curKey, -1); confirmId = null; if (!$('view-admin').hidden) carregarAdmin(); else { if (!readOnly()) resetForm(); assinar(); } });
+$('next').addEventListener('click', () => { curKey = shiftKey(curKey, 1); confirmId = null; if (!$('view-admin').hidden) carregarAdmin(); else { if (!readOnly()) resetForm(); assinar(); } });
+
+// ======================================================================
+// Cupom: foto (câmera/galeria) ou PDF, comprimido para caber no banco
+// ======================================================================
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
+const loadImg = src => new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = src; });
+const toBlob = (c, q) => new Promise(r => c.toBlob(b => r(b), 'image/jpeg', q));
+const blobToDataUrl = b => new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); });
+const MAXB = 850 * 1024;
+async function compactar(src, w0, h0) {
+  // tenta tamanhos e qualidades até a página caber em ~850 KB
+  for (const [dim, q] of [[1600, .72], [1400, .65], [1200, .6], [1000, .55], [800, .5]]) {
+    const k = Math.min(1, dim / Math.max(w0, h0)); const c = document.createElement('canvas');
+    c.width = Math.round(w0 * k); c.height = Math.round(h0 * k); const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(src, 0, 0, c.width, c.height);
+    const b = await toBlob(c, q); if (b && b.size <= MAXB) return { bytes: new Uint8Array(await b.arrayBuffer()), w: c.width, h: c.height, canvas: c };
+  }
+  throw new Error('Imagem grande demais. Tente tirar a foto de novo, mais perto do cupom.');
+}
+async function miniatura(canvas) { const k = 160 / Math.max(canvas.width, canvas.height); const c = document.createElement('canvas'); c.width = Math.round(canvas.width * k); c.height = Math.round(canvas.height * k); c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', .6); }
+async function processarArquivo(file) {
+  const name = file.name || 'cupom'; const ext = (name.split('.').pop() || '').toLowerCase();
+  const isPdf = file.type === 'application/pdf' || ext === 'pdf';
+  if (file.size > 25 * 1024 * 1024) throw new Error('Arquivo muito grande (máximo 25 MB).');
+  const pages = [];
+  if (isPdf) {
+    if (!window.pdfjsLib) throw new Error('Leitor de PDF não carregou.');
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    for (let n = 1; n <= Math.min(pdf.numPages, 3); n++) {
+      const pg = await pdf.getPage(n); const v0 = pg.getViewport({ scale: 1 }); const v = pg.getViewport({ scale: Math.min(3, 1600 / v0.width) });
+      const c = document.createElement('canvas'); c.width = v.width; c.height = v.height; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+      await pg.render({ canvasContext: g, viewport: v }).promise; pages.push(await compactar(c, c.width, c.height));
+    }
+  } else {
+    const url = URL.createObjectURL(file);
+    try { const img = await loadImg(url); pages.push(await compactar(img, img.naturalWidth, img.naturalHeight)); }
+    catch (e) { throw e && e.message && e.message.startsWith('Imagem') ? e : new Error('Não consegui ler essa imagem. Use JPG, PNG ou PDF.'); }
+    finally { URL.revokeObjectURL(url); }
+  }
+  return { novo: true, pages: pages.map(p => ({ bytes: p.bytes, w: p.w, h: p.h })), tipo: isPdf ? 'pdf' : 'img', nome: name, thumb: await miniatura(pages[0].canvas) };
+}
+let pendingAtt = null, removedAtt = false;
+function showAtt() {
+  const a = pendingAtt; $('btnAttDel').hidden = !a; $('attThumb').hidden = !(a && a.thumb);
+  if (!a) { $('attName').innerHTML = '<span class="hint">Foto do cupom fiscal (JPG, PNG) ou PDF. No computador, também dá para arrastar o arquivo aqui.</span>'; return; }
+  if (a.thumb) $('attThumb').src = a.thumb;
+  $('attName').textContent = (a.nome || 'Cupom') + (a.novo ? ' · ' + Math.round(a.pages.reduce((s, p) => s + p.bytes.length, 0) / 1024) + ' KB' : ' · já anexado');
+}
+async function handleFile(file) {
+  if (!file) return; $('formErr').textContent = ''; $('attName').textContent = 'Preparando ' + (file.name || 'foto') + '…';
+  try { pendingAtt = await processarArquivo(file); } catch (e) { $('formErr').textContent = e.message || 'Não consegui ler esse arquivo.'; }
+  showAtt();
+}
+$('btnCam').addEventListener('click', () => $('camFile').click());
+$('btnClip').addEventListener('click', () => $('attFile').click());
+$('camFile').addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
+$('attFile').addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
+$('btnAttDel').addEventListener('click', () => { if (pendingAtt && !pendingAtt.novo) removedAtt = true; pendingAtt = null; showAtt(); });
+const fbox = $('form');
+fbox.addEventListener('dragover', e => { e.preventDefault(); $('attBox').classList.add('drag'); });
+fbox.addEventListener('dragleave', e => { if (!fbox.contains(e.relatedTarget)) $('attBox').classList.remove('drag'); });
+fbox.addEventListener('drop', e => { e.preventDefault(); $('attBox').classList.remove('drag'); handleFile(e.dataTransfer.files[0]); });
+window.addEventListener('dragover', e => e.preventDefault()); window.addEventListener('drop', e => e.preventDefault());
+
+async function cupomImagens(uid, x) {
+  const out = [];
+  for (let k = 1; k <= ((x.cupom && x.cupom.paginas) || 0); k++) {
+    const c = await Store.lerCupom(uid, x.id, k);
+    if (c) out.push({ url: await blobToDataUrl(new Blob([c.bytes], { type: 'image/jpeg' })), w: c.w, h: c.h });
+  }
+  return out;
+}
+$('vClose').addEventListener('click', () => $('viewer').close());
+
+// ======================================================================
+// Formulário de lançamento
+// ======================================================================
+function defaultDate() { const { start, end } = cycleRange(curKey); const t = new Date(); t.setHours(0, 0, 0, 0); return iso(t < start ? start : t > end ? end : t); }
+function resetForm() { editingId = null; $('form').reset(); $('iData').value = defaultDate(); pendingAtt = null; removedAtt = false; showAtt(); $('btnSave').textContent = 'Adicionar'; $('btnCancel').hidden = true; $('formErr').textContent = ''; $('ppl').textContent = ''; }
+function updPpl() { const l = parseNum($('iLitros').value), v = parseNum($('iValor').value); $('ppl').textContent = (l > 0 && v > 0) ? 'Preço por litro: ' + brl(v / l) : ''; }
+$('iLitros').addEventListener('input', updPpl); $('iValor').addEventListener('input', updPpl);
+$('btnCancel').addEventListener('click', () => { resetForm(); render(); });
+
+$('form').addEventListener('submit', e => {
+  e.preventDefault(); if (readOnly()) return;
+  const data = $('iData').value, posto = $('iPosto').value.trim(), valor = parseNum($('iValor').value), litros = parseNum($('iLitros').value);
+  const err = m => { $('formErr').textContent = m; };
+  if (!data) return err('Informe a data do abastecimento.');
+  const { start, end } = cycleRange(curKey); const d = fromIso(data);
+  if (d < start || d > end) return err('A data precisa estar entre ' + periodText() + '. Para outro período, troque o ciclo no topo.');
+  if (!posto) return err('Informe o nome do posto.');
+  if (!(valor > 0)) return err('Informe o valor pago, por exemplo 150,00.');
+  if ($('iLitros').value.trim() && !(litros > 0)) return err('Litros inválidos. Use vírgula para decimais, por exemplo 25,312.');
+  const old = editingId ? lancs.find(x => x.id === editingId) : null;
+  const id = old ? old.id : Store.novoId(me.uid);
+  const oldPag = old && old.cupom ? old.cupom.paginas : 0;
+  let cupom = old ? old.cupom || null : null, thumb = old ? old.thumb || null : null;
+  if (pendingAtt && pendingAtt.novo) {
+    cupom = { paginas: pendingAtt.pages.length, tipo: pendingAtt.tipo, nome: pendingAtt.nome }; thumb = pendingAtt.thumb;
+    Store.salvarCupom(me.uid, id, pendingAtt.pages, oldPag).catch(x => status('Não consegui salvar o cupom: ' + errMsg(x), true));
+  } else if (removedAtt && oldPag) {
+    cupom = null; thumb = null; Store.excluirCupom(me.uid, id, oldPag).catch(() => {});
+  }
+  const rec = { data, posto, comb: $('iComb').value, valor: Math.round(valor * 100) / 100, litros: litros > 0 ? litros : 0, km: $('iKm').value.trim(), nf: $('iNf').value.trim(), cupom, thumb };
+  // não espera o servidor: aparece na hora e sincroniza quando houver internet
+  Store.salvarLancamento(me.uid, id, rec, !old).catch(x => status('Não consegui salvar o lançamento: ' + errMsg(x), true));
+  resetForm(); $('iPosto').focus();
+});
+
+$('list').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return; const id = b.dataset.id, act = b.dataset.act;
+  const x = lancs.find(z => z.id === id);
+  if (act === 'view' && x) {
+    $('vTitle').textContent = br(x.data) + ' · ' + x.posto + ' · ' + brl(x.valor); $('vBody').innerHTML = '<span class="hint">Carregando…</span>'; $('viewer').showModal();
+    try { const imgs = await cupomImagens(viewUid, x); $('vBody').innerHTML = imgs.length ? '' : '<span class="hint">Cupom não encontrado.</span>'; imgs.forEach(i => { const im = new Image(); im.src = i.url; im.alt = 'Cupom'; $('vBody').appendChild(im); }); }
+    catch (er) { $('vBody').innerHTML = '<span class="bad-txt">Não consegui abrir o cupom: ' + esc(errMsg(er)) + '</span>'; }
+    return;
+  }
+  if (readOnly()) return;
+  if (act === 'ask') confirmId = id;
+  else if (act === 'nodel') confirmId = null;
+  else if (act === 'del' && x) { confirmId = null; if (editingId === id) resetForm(); Store.excluirLancamento(me.uid, id, x.cupom ? x.cupom.paginas : 0).catch(er => status('Não consegui excluir: ' + errMsg(er), true)); }
+  else if (act === 'edit' && x) {
+    resetForm(); editingId = id;
+    $('iData').value = x.data; $('iPosto').value = x.posto; $('iComb').value = x.comb; $('iValor').value = n2(x.valor);
+    $('iLitros').value = x.litros ? n2(x.litros, 3) : ''; $('iKm').value = x.km || ''; $('iNf').value = x.nf || '';
+    pendingAtt = x.cupom ? { novo: false, nome: x.cupom.nome, tipo: x.cupom.tipo, thumb: x.thumb } : null; showAtt();
+    $('btnSave').textContent = 'Salvar alteração'; $('btnCancel').hidden = false; updPpl(); $('formPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  render();
+});
+
+// ======================================================================
+// Meus dados
+// ======================================================================
+function fillProfileForm() {
+  const p = myProfile; $('pNome').value = p.nome || ''; $('pCargo').value = p.cargo || ''; $('pCartao').value = p.cartao || ''; $('pEmissor').value = p.emissor || '';
+  $('pPlaca').value = p.placa || ''; $('pEmpresa').value = p.empresa || ''; $('pLimite').value = n2(p.limite); $('pFech').value = p.fech;
+}
+$('pform').addEventListener('submit', e => {
+  e.preventDefault();
+  const lim = parseNum($('pLimite').value), f = parseInt($('pFech').value, 10);
+  if (!(lim > 0)) { $('pMsg').textContent = 'Informe um limite válido, por exemplo 500,00.'; return; }
+  if (!(f >= 1 && f <= 28)) { $('pMsg').textContent = 'O dia de fechamento deve ficar entre 1 e 28.'; return; }
+  const fechMudou = f !== myProfile.fech;
+  myProfile = { nome: $('pNome').value.trim(), cargo: $('pCargo').value.trim(), emissor: $('pEmissor').value.trim(), cartao: $('pCartao').value.replace(/\D/g, '').slice(-4),
+    placa: $('pPlaca').value.trim(), empresa: $('pEmpresa').value.trim(), limite: lim, fech: f, email: me.email };
+  Store.salvarPerfil(me.uid, myProfile).catch(x => $('pMsg').textContent = 'Não consegui salvar: ' + errMsg(x));
+  $('whoName').textContent = myProfile.nome || me.email; $('whoEmail').textContent = myProfile.nome ? me.email : '';
+  $('pMsg').textContent = 'Dados salvos.'; profile = myProfile;
+  if (fechMudou) { curKey = cycleKeyFor(new Date(), f); assinar(); } else render();
+});
+
+// ======================================================================
+// Comprovantes na impressão e no PDF
+// ======================================================================
+async function attachmentPages() {
+  const out = []; const it = items();
+  for (let i = 0; i < it.length; i++) {
+    const x = it[i]; if (!x.cupom) continue; let imgs = [];
+    try { imgs = await cupomImagens(viewUid, x); } catch (_) {}
+    imgs.forEach((im, k) => out.push({ url: im.url, w: im.w, h: im.h, titulo: 'Comprovante ' + (i + 1) + (imgs.length > 1 ? ' (' + (k + 1) + '/' + imgs.length + ')' : ''),
+      sub: br(x.data) + ' · ' + x.posto + ' · ' + brl(x.valor) + (x.nf ? ' · Cupom/NF ' + x.nf : '') }));
+  }
+  return out;
+}
+function setDecl(withAtt) { const it = items(); const com = it.filter(x => x.cupom).length; DECL = withAtt && com ? DECL_BASE.replace('seguem anexos.', 'seguem anexos (' + com + ' de ' + it.length + ' lançamento' + (it.length > 1 ? 's' : '') + ').') : DECL_BASE; }
+async function logoDataUrl() { if (LOGO) return LOGO; try { const r = await fetch('icons/logo.png'); LOGO = await blobToDataUrl(await r.blob()); } catch (_) { LOGO = null; } return LOGO; }
+function nomeArquivo() { const [yy, mm] = curKey.split('-'); const n = (profile.nome || 'colaborador').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, ''); return 'Relatorio-Gasolina-' + yy + '-' + mm + '-' + n; }
+async function buildPdf(withAtt) {
+  setDecl(withAtt);
+  const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const p = profile, { it, tot, lit } = totals(), W = 210, M = 16;
+  const logo = await logoDataUrl(); if (logo) { try { doc.addImage(logo, 'PNG', M, 9, 30, 30 / 1.671); } catch (e) {} }
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(58, 58, 55);
+  doc.text('Relatório de Despesas', M + 36, 15.5); doc.setFontSize(10.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(90);
+  doc.text('Cartão Corporativo · Combustível', M + 36, 21);
+  doc.setDrawColor(245, 180, 0); doc.setLineWidth(1); doc.line(M, 30, W - M, 30);
+  doc.setTextColor(30); doc.setFontSize(9.5);
+  const meta = [['Colaborador', p.nome || ''], ['Empresa', p.empresa || '—'], ['Cargo/Depto', p.cargo || '—'], ['Cartão', cardTxt()], ['Veículo', p.placa || '—'], ['Fatura', refMonth()], ['Período', periodText()]];
+  meta.forEach((r, i) => { const x = i % 2 ? W / 2 + 4 : M, y = 37 + Math.floor(i / 2) * 6; doc.setFont('helvetica', 'normal'); doc.setTextColor(100); doc.text(r[0] + ':', x, y); doc.setTextColor(20); doc.setFont('helvetica', 'bold'); doc.text(r[1] || '________________________', x + 27, y); });
+  const body = it.map((x, i) => [i + 1, br(x.data), x.posto + (x.comb === 'Gasolina aditivada' ? ' (aditivada)' : ''), x.nf || '—', x.km || '—', x.litros ? n2(x.litros, 3) : '—', x.litros ? n2(x.valor / x.litros, 3) : '—', brl(x.valor)]);
+  doc.autoTable({ startY: 63, margin: { left: M, right: M }, head: [['#', 'Data', 'Posto', 'Cupom/NF', 'Km', 'Litros', 'R$/L', 'Valor']], body,
+    foot: [['', '', 'Total', '', '', n2(lit, 3), '', brl(tot)]], theme: 'grid',
+    styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 1.8, lineColor: [200, 200, 200], lineWidth: .2 },
+    headStyles: { fillColor: [58, 58, 55], textColor: 255 }, footStyles: { fillColor: [253, 240, 204], textColor: 20, fontStyle: 'bold' },
+    columnStyles: { 0: { cellWidth: 8 }, 1: { cellWidth: 20 }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right', cellWidth: 24 } } });
+  let y = doc.lastAutoTable.finalY + 8;
+  doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(60);
+  doc.text('Limite do ciclo: ' + brl(p.limite) + '     Saldo: ' + brl(p.limite - tot) + (tot > p.limite ? ' (excedido)' : ''), M, y); y += 8;
+  const lines = doc.splitTextToSize(DECL, W - 2 * M); doc.text(lines, M, y); y += lines.length * 4.6 + 6;
+  const sy = Math.max(y + 22, 250); doc.setDrawColor(40); doc.setLineWidth(.3);
+  const cw = 100, sx = (W - cw) / 2;
+  doc.line(sx, sy, sx + cw, sy); doc.setTextColor(20); doc.setFont('helvetica', 'bold'); doc.text(p.nome || '', sx + cw / 2, sy + 5, { align: 'center' });
+  doc.setFont('helvetica', 'normal'); doc.setTextColor(100); doc.text('Data ____/____/______', sx + cw / 2, sy + 10, { align: 'center' });
+  doc.setFontSize(7.5); doc.setTextColor(150); doc.text('Gerado em ' + new Date().toLocaleString('pt-BR') + ' · Relatório de Gasolina v' + APPVER, M, 290);
+  if (withAtt) {
+    for (const pg of await attachmentPages()) {
+      doc.addPage();
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(58, 58, 55); doc.text(pg.titulo, M, 18);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(90); doc.text(doc.splitTextToSize(pg.sub, W - 2 * M), M, 24);
+      doc.setDrawColor(245, 180, 0); doc.setLineWidth(.8); doc.line(M, 29, W - M, 29);
+      const mw = W - 2 * M, mh = 297 - 36 - 14; const k = Math.min(mw / pg.w, mh / pg.h); const iw = pg.w * k, ih = pg.h * k;
+      doc.addImage(pg.url, 'JPEG', (W - iw) / 2, 36, iw, ih, undefined, 'FAST');
+    }
+  }
+  setDecl(false);
+  return doc;
+}
+$('btnPdf').addEventListener('click', async () => {
+  const msg = $('pdfMsg'); if (!window.jspdf) { msg.textContent = 'Gerador de PDF não carregou. Recarregue a página.'; return; }
+  msg.textContent = 'Gerando PDF…';
+  try { (await buildPdf($('incAtt').checked)).save(nomeArquivo() + '.pdf'); msg.textContent = ''; } catch (e) { msg.textContent = 'Não consegui gerar o PDF: ' + errMsg(e); }
+});
+$('btnPrint').addEventListener('click', async () => {
+  const msg = $('pdfMsg'); const inc = $('incAtt').checked; const box = $('attPages'); box.innerHTML = '';
+  if (inc) {
+    msg.textContent = 'Preparando comprovantes…';
+    try {
+      for (const pg of await attachmentPages()) {
+        const d = document.createElement('section'); d.className = 'att-page';
+        d.innerHTML = '<header><b></b><span></span></header><div class="img"><img alt=""></div>';
+        d.querySelector('b').textContent = pg.titulo; d.querySelector('span').textContent = pg.sub; d.querySelector('img').src = pg.url; box.appendChild(d);
+      }
+    } catch (_) {}
+    setDecl(true); const t = totals(); renderSheet(t.it, t.tot, t.lit); msg.textContent = '';
+  }
+  const t = document.title; document.title = nomeArquivo();
+  await new Promise(r => setTimeout(r, 80)); window.print(); document.title = t; box.innerHTML = ''; setDecl(false); render();
+});
+$('incAtt').addEventListener('change', () => { try { localStorage.setItem('rg.incAtt', $('incAtt').checked ? '1' : '0'); } catch (_) {} });
+try { if (localStorage.getItem('rg.incAtt') === '0') $('incAtt').checked = false; } catch (_) {}
+
+// ======================================================================
+// Trazer dados do programa antigo (pasta "Relatório de Gasolina")
+// ======================================================================
+$('btnImp').addEventListener('click', () => $('impDir').click());
+$('impDir').addEventListener('change', async e => {
+  const files = [...e.target.files]; e.target.value = ''; const msg = $('impMsg');
+  const dj = files.find(f => /(^|\/)dados\.json$/i.test(f.webkitRelativePath || f.name) && (f.webkitRelativePath || '').split('/').length <= 2);
+  if (!dj) { msg.textContent = 'Não encontrei o arquivo dados.json nessa pasta. Escolha a pasta "Relatório de Gasolina".'; return; }
+  const base = (dj.webkitRelativePath || '').split('/').slice(0, -1).join('/');
+  const byRel = new Map(files.map(f => [(f.webkitRelativePath || f.name).slice(base ? base.length + 1 : 0), f]));
+  let d; try { d = JSON.parse((await dj.text()).replace(/^﻿/, '')); } catch (_) { msg.textContent = 'O dados.json está com erro e não pôde ser lido.'; return; }
+  const itens = Object.values(d.ciclos || {}).flatMap(c => c.itens || []).filter(x => /^\d{4}-\d\d-\d\d$/.test(x.data || '') && Number(x.valor) > 0);
+  if (!itens.length) { msg.textContent = 'Não há lançamentos nesse dados.json.'; return; }
+  // perfil: preenche só o que estiver vazio aqui
+  const pf = d.perfil || {}; let mudouPerfil = false;
+  for (const k of ['nome', 'cargo', 'emissor', 'cartao', 'placa', 'empresa']) if (!myProfile[k] && pf[k]) { myProfile[k] = pf[k]; mudouPerfil = true; }
+  if (mudouPerfil) { Store.salvarPerfil(me.uid, { ...myProfile, email: me.email }).catch(() => {}); fillProfileForm(); }
+  let n = 0, fotos = 0, falhas = 0;
+  for (const x of itens) {
+    msg.textContent = 'Importando ' + (++n) + ' de ' + itens.length + '…';
+    const id = String(x.id || ('imp-' + x.data + '-' + n)).replace(/[\/\s]/g, '_').slice(0, 100);
+    let cupom = null, thumb = null;
+    const rel = x.anexo && x.anexo.arquivo; const f = rel && byRel.get(rel);
+    if (f) {
+      try { const a = await processarArquivo(f); cupom = { paginas: a.pages.length, tipo: a.tipo, nome: (x.anexo.nome || f.name) }; thumb = a.thumb; Store.salvarCupom(me.uid, id, a.pages, 0).catch(() => {}); fotos++; }
+      catch (_) { falhas++; }
+    }
+    Store.salvarLancamento(me.uid, id, { data: x.data, posto: String(x.posto || '').slice(0, 200) || 'Posto', comb: x.combustivel || 'Gasolina comum', litros: Number(x.litros) || 0, valor: Number(x.valor), km: x.km || '', nf: x.cupom_nf || '', cupom, thumb, origem: 'importado' }, true)
+      .catch(er => status('Falha ao importar: ' + errMsg(er), true));
+  }
+  msg.textContent = itens.length + ' lançamento' + (itens.length > 1 ? 's' : '') + ' importado' + (itens.length > 1 ? 's' : '') + ', com ' + fotos + ' cupo' + (fotos === 1 ? 'm' : 'ns') + (falhas ? '. ' + falhas + ' cupom(ns) não puderam ser lidos.' : '.') + ' Use as setas do topo para ver os outros meses.';
+});
+
+// ======================================================================
+// Administração
+// ======================================================================
+let convites = [], usuarios = [];
+function abrirAdmin() {
+  if (!isAdmin) return;
+  if (unsub) { unsub(); unsub = null; }
+  viewUid = me.uid; profile = myProfile;
+  $('tabMine').setAttribute('aria-selected', 'false'); $('tabAdmin').setAttribute('aria-selected', 'true');
+  $('view-main').hidden = true; $('view-admin').hidden = false; $('roBanner').hidden = true;
+  carregarAdmin();
+}
+async function carregarAdmin() {
+  const [y, m] = curKey.split('-').map(Number);
+  $('cycTitle').textContent = 'Fatura ' + MESES[m - 1] + '/' + y; $('cycRange').textContent = 'todos os funcionários';
+  $('repBody').innerHTML = '<tr><td colspan="6" class="hint">Carregando…</td></tr>';
+  try { [convites, usuarios] = await Promise.all([Store.listarConvites(), Store.listarUsuarios()]); }
+  catch (e) { $('repBody').innerHTML = '<tr><td colspan="6" class="bad-txt">Não consegui carregar: ' + esc(errMsg(e)) + '</td></tr>'; return; }
+  renderConvites();
+  const ativos = new Set(convites.filter(c => c.ativo).map(c => c.email));
+  const lista = usuarios.filter(u => ativos.has((u.email || '').toLowerCase())).sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email, 'pt-BR'));
+  const linhas = await Promise.all(lista.map(async u => {
+    const F = u.fech || 25; const { start, end } = cycleRange(curKey, F);
+    try { const ls = await Store.lancamentosPeriodo(u.uid, iso(start), iso(end)); return { u, ls }; } catch (e) { return { u, ls: null, e }; }
+  }));
+  const semAcesso = convites.filter(c => c.ativo && !usuarios.some(u => (u.email || '').toLowerCase() === c.email));
+  $('repHint').textContent = lista.length + ' funcionário' + (lista.length !== 1 ? 's' : '') + (semAcesso.length ? ' · ' + semAcesso.length + ' ainda não entrou' + (semAcesso.length > 1 ? 'aram' : '') : '');
+  $('repBody').innerHTML = linhas.map(({ u, ls, e }) => {
+    if (!ls) return '<tr><td>' + esc(u.nome || u.email) + '</td><td colspan="5" class="bad-txt">' + esc(errMsg(e)) + '</td></tr>';
+    const tot = ls.reduce((s, x) => s + (Number(x.valor) || 0), 0); const sem = ls.filter(x => !x.cupom).length; const L = u.limite || 500;
+    const sit = !ls.length ? '<span class="hint">Sem lançamentos</span>' : tot > L ? '<span class="bad-txt">Acima do limite</span>' : tot >= .85 * L ? '<span class="warn-txt">Perto do limite</span>' : '<span class="ok-txt">Dentro do limite</span>';
+    return '<tr><td>' + esc(u.nome || '—') + '<div class="hint">' + esc(u.email) + '</div></td><td class="r num">' + ls.length + '</td><td class="r num">' + brl(tot) + '</td><td class="r num ' + (sem ? 'warn-txt' : '') + '">' + sem + '</td><td>' + sit + '</td><td class="r"><button class="link" data-ver="' + u.uid + '">Ver relatório</button></td></tr>';
+  }).join('') + semAcesso.map(c => '<tr><td>' + esc(c.nome || '—') + '<div class="hint">' + esc(c.email) + '</div></td><td colspan="4" class="hint">Ainda não fez o primeiro acesso</td><td></td></tr>').join('')
+    || '<tr><td colspan="6" class="hint">Nenhum funcionário ainda. Libere o acesso no quadro abaixo.</td></tr>';
+}
+$('repBody').addEventListener('click', e => { const b = e.target.closest('[data-ver]'); if (!b) return; const u = usuarios.find(x => x.uid === b.dataset.ver); if (u) abrirDeOutro(u); });
+function renderConvites() {
+  $('funCount').textContent = convites.filter(c => c.ativo).length + ' com acesso';
+  $('convBody').innerHTML = convites.sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email, 'pt-BR')).map(c => {
+    const eu = c.email === me.email;
+    return '<tr><td>' + esc(c.nome || '—') + '</td><td>' + esc(c.email) + '</td><td>' + (c.ativo ? '<span class="tag on">Ativo</span>' : '<span class="tag off">Desativado</span>') + (c.admin ? ' <span class="tag adm">Administrador</span>' : '') + '</td><td class="r">' +
+      (eu ? '<span class="hint">você</span>' : (c.ativo ? '<button class="link danger" data-cv="off" data-em="' + esc(c.email) + '">Desativar</button>' : '<button class="link" data-cv="on" data-em="' + esc(c.email) + '">Reativar</button>') +
+        (c.admin ? '<button class="link" data-cv="noadm" data-em="' + esc(c.email) + '">Tirar admin</button>' : '<button class="link" data-cv="adm" data-em="' + esc(c.email) + '">Tornar admin</button>')) + '</td></tr>';
+  }).join('');
+}
+$('convBody').addEventListener('click', async e => {
+  const b = e.target.closest('[data-cv]'); if (!b) return; const c = convites.find(x => x.email === b.dataset.em); if (!c) return;
+  const novo = { nome: c.nome || '', ativo: c.ativo, admin: !!c.admin };
+  if (b.dataset.cv === 'off') novo.ativo = false; if (b.dataset.cv === 'on') novo.ativo = true; if (b.dataset.cv === 'adm') novo.admin = true; if (b.dataset.cv === 'noadm') novo.admin = false;
+  b.disabled = true;
+  try { await Store.salvarConvite(c.email, novo); Object.assign(c, novo); renderConvites(); carregarAdmin(); } catch (x) { $('cErr').textContent = errMsg(x); b.disabled = false; }
+});
+$('fConv').addEventListener('submit', async e => {
+  e.preventDefault(); $('cErr').textContent = '';
+  const em = $('cEmail').value.trim().toLowerCase(), nome = $('cNome').value.trim();
+  if (!/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(em)) { $('cErr').textContent = 'Informe um e-mail válido.'; return; }
+  try { await Store.salvarConvite(em, { nome, ativo: true, admin: $('cAdmin').checked }); $('fConv').reset(); $('cErr').textContent = ''; carregarAdmin(); }
+  catch (x) { $('cErr').textContent = 'Não consegui liberar: ' + errMsg(x); }
+});
+
+// ---------- exportações ----------
+function baixar(nome, conteudo, tipo) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([conteudo], { type: tipo })); a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000); }
+const csvCel = v => { const s = String(v ?? ''); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+$('btnCsv').addEventListener('click', async () => {
+  const msg = $('expMsg'); msg.textContent = 'Montando planilha…';
+  try {
+    const us = await Store.listarUsuarios(); const linhas = [['Funcionário', 'E-mail', 'Fatura', 'Data', 'Posto', 'Combustível', 'Litros', 'Valor (R$)', 'Km', 'Cupom/NF', 'Comprovante anexado']];
+    for (const u of us) {
+      const { start, end } = cycleRange(curKey, u.fech || 25);
+      const ls = (await Store.lancamentosPeriodo(u.uid, iso(start), iso(end))).sort((a, b) => a.data.localeCompare(b.data));
+      for (const x of ls) linhas.push([u.nome || '', u.email || '', curKey, br(x.data), x.posto, x.comb, n2(x.litros || 0, 3), n2(x.valor), x.km || '', x.nf || '', x.cupom ? 'Sim' : 'Não']);
+    }
+    baixar('Gasolina-' + curKey + '-todos.csv', '﻿' + linhas.map(l => l.map(csvCel).join(';')).join('\r\n'), 'text/csv;charset=utf-8');
+    msg.textContent = (linhas.length - 1) + ' lançamentos exportados. Abre direto no Excel.';
+  } catch (e) { msg.textContent = 'Não consegui exportar: ' + errMsg(e); }
+});
+async function backup(comFotos) {
+  const msg = $('expMsg'); msg.textContent = 'Preparando backup…';
+  try {
+    const out = { app: 'relatorio-gasolina-web', versao: APPVER, gerado_em: new Date().toISOString(), convites: await Store.listarConvites(), usuarios: [] };
+    const us = await Store.listarUsuarios(); let i = 0;
+    for (const u of us) {
+      msg.textContent = 'Backup: ' + (++i) + ' de ' + us.length + ' funcionários…';
+      const ls = await Store.todosLancamentos(u.uid);
+      const lancamentos = [];
+      for (const x of ls) {
+        const y = { ...x }; delete y.thumb; delete y.pendente;
+        for (const k of ['criado_em', 'alterado_em']) if (y[k] && y[k].toDate) y[k] = y[k].toDate().toISOString();
+        if (comFotos && x.cupom) { y.cupom_imagens = []; for (let k = 1; k <= x.cupom.paginas; k++) { const c = await Store.lerCupom(u.uid, x.id, k); if (c) y.cupom_imagens.push('data:image/jpeg;base64,' + (await blobToDataUrl(new Blob([c.bytes]))).split(',')[1]); } }
+        lancamentos.push(y);
+      }
+      const pf = { ...u }; if (pf.alterado_em && pf.alterado_em.toDate) pf.alterado_em = pf.alterado_em.toDate().toISOString();
+      out.usuarios.push({ ...pf, lancamentos });
+    }
+    out.convites.forEach(c => { for (const k of ['criado_em', 'alterado_em']) if (c[k] && c[k].toDate) c[k] = c[k].toDate().toISOString(); });
+    baixar('backup-relatorio-gasolina-' + iso(new Date()) + (comFotos ? '-com-fotos' : '') + '.json', JSON.stringify(out, null, comFotos ? 0 : 2), 'application/json');
+    msg.textContent = 'Backup gerado. Guarde o arquivo em local seguro (ele contém dados dos funcionários).';
+  } catch (e) { msg.textContent = 'Não consegui gerar o backup: ' + errMsg(e); }
+}
+$('btnBkData').addEventListener('click', () => backup(false));
+$('btnBkFull').addEventListener('click', () => backup(true));
+
+// ======================================================================
+// Início
+// ======================================================================
+const cfg = window.FIREBASE_CONFIG || {};
+if (!cfg.apiKey || cfg.apiKey === 'COLE_AQUI') { authMode('noconfig'); }
+else {
+  try { Store.iniciar(cfg); ligarLogin(); } catch (e) { authMode('noconfig'); $('pNoConfig').innerHTML = '<p class="bad-txt">Erro na configuração do Firebase: ' + esc(e.message) + '</p>'; }
+}
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
