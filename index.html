@@ -198,6 +198,19 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
       <div class="err" id="lErr" role="alert"></div>
       <button class="primary" type="submit" id="btnEntrar">Entrar</button>
       <div class="links"><button type="button" class="link" data-mode="signup">Primeiro acesso</button><button type="button" class="link" data-mode="reset">Esqueci a senha</button></div>
+      <div class="links"><button type="button" class="link" data-mode="colar">O link do e-mail não abre?</button></div>
+    </form>
+
+    <form id="fColar" novalidate hidden>
+      <p>Se o link que chegou por e-mail (troca de senha ou confirmação) não abre na sua rede:</p>
+      <ol class="hint" style="margin:0;padding-left:18px">
+        <li>No e-mail, clique com o botão direito no link e escolha <b>Copiar endereço do link</b>.</li>
+        <li>Cole aqui embaixo e toque em <b>Continuar</b>.</li>
+      </ol>
+      <div class="f"><label class="label" for="kLink">Link do e-mail</label><textarea id="kLink" rows="3" style="font:inherit;font-size:14px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);width:100%;resize:vertical" placeholder="https://...firebaseapp.com/__/auth/action?mode=..."></textarea></div>
+      <div class="err" id="kErr" role="alert"></div>
+      <button class="primary" type="submit">Continuar</button>
+      <div class="links"><button type="button" class="link" data-mode="login">Voltar para o login</button></div>
     </form>
 
     <form id="fSignup" novalidate hidden>
@@ -215,7 +228,7 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
       <div class="f"><label class="label" for="rEmail">E-mail</label><input id="rEmail" type="email" autocomplete="username" inputmode="email"></div>
       <div class="err" id="rErr" role="alert"></div><div class="msg-ok" id="rOk"></div>
       <button class="primary" type="submit">Enviar link</button>
-      <div class="links"><button type="button" class="link" data-mode="login">Voltar para o login</button></div>
+      <div class="links"><button type="button" class="link" data-mode="login">Voltar para o login</button><button type="button" class="link" data-mode="colar">O link do e-mail não abre?</button></div>
     </form>
 
     <div id="pVerify" hidden>
@@ -223,6 +236,7 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
       <p class="hint">Não chegou? Procure também na caixa de spam ou lixo eletrônico.</p>
       <div class="err" id="vErr" role="alert"></div><div class="msg-ok" id="vOk"></div>
       <div class="form-actions"><button class="primary" id="btnVerificado">Já confirmei</button><button id="btnReenviar">Reenviar e-mail</button><button class="link" data-sair>Sair</button></div>
+      <div class="links"><button type="button" class="link" data-mode="colar">O link do e-mail não abre?</button></div>
     </div>
 
     <div id="pBlocked" hidden>

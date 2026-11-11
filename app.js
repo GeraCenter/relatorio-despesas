@@ -1,6 +1,6 @@
 (function () {
 'use strict';
-const APPVER = '2.2.0';
+const APPVER = '2.3.0';
 const $ = id => document.getElementById(id);
 const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -53,7 +53,8 @@ const errMsg = e => {
 // Login
 // ======================================================================
 function authMode(mode) {
-  ['fLogin', 'fSignup', 'fReset', 'pVerify', 'pBlocked', 'pNoConfig', 'pAction', 'pSenha'].forEach(id => $(id).hidden = true);
+  ['fLogin', 'fSignup', 'fReset', 'fColar', 'pVerify', 'pBlocked', 'pNoConfig', 'pAction', 'pSenha'].forEach(id => $(id).hidden = true);
+  if (mode === 'colar') { $('fColar').hidden = false; $('kErr').textContent = ''; }
   if (mode === 'senha') $('pSenha').hidden = false;
   ({ login: 'fLogin', signup: 'fSignup', reset: 'fReset', verify: 'pVerify', blocked: 'pBlocked', noconfig: 'pNoConfig' })[mode] && ($({ login: 'fLogin', signup: 'fSignup', reset: 'fReset', verify: 'pVerify', blocked: 'pBlocked', noconfig: 'pNoConfig' }[mode]).hidden = false);
   ['lErr', 'sErr', 'rErr', 'rOk', 'vErr', 'vOk'].forEach(id => $(id).textContent = '');
@@ -100,7 +101,7 @@ $('fSignup').addEventListener('submit', async e => {
 $('fReset').addEventListener('submit', async e => {
   e.preventDefault(); $('rErr').textContent = ''; $('rOk').textContent = '';
   const em = $('rEmail').value.trim(); if (!em) { $('rErr').textContent = 'Informe o e-mail.'; return; }
-  try { await Store.esqueciSenha(em); $('rOk').textContent = 'Se esse e-mail tiver acesso, o link chega em alguns minutos. Veja também o spam.'; }
+  try { await Store.esqueciSenha(em); $('rOk').textContent = 'Se esse e-mail tiver acesso, o link chega em alguns minutos. Veja também o spam. Se o link não abrir, use "O link do e-mail não abre?".'; }
   catch (x) { if (x && x.code === 'auth/user-not-found') $('rOk').textContent = 'Se esse e-mail tiver acesso, o link chega em alguns minutos. Veja também o spam.'; else $('rErr').textContent = authErr(x); }
 });
 $('btnVerificado').addEventListener('click', async () => {
@@ -112,6 +113,20 @@ $('btnReenviar').addEventListener('click', async () => {
   try { await Store.reenviarConfirmacao(); $('vOk').textContent = 'E-mail reenviado.'; } catch (x) { $('vErr').textContent = authErr(x); }
 });
 $('btnTentar').addEventListener('click', () => me && entrarNoSistema(me));
+// link de e-mail colado: aceita o link direto ou "embrulhado" por Outlook/Gmail/antivírus
+function lerLinkColado(txt) {
+  let t = String(txt || '').trim();
+  for (let i = 0; i < 4; i++) { try { const d = decodeURIComponent(t); if (d === t) break; t = d; } catch (_) { break; } }
+  const mode = (t.match(/[?&]mode=([A-Za-z]+)/) || [])[1], code = (t.match(/[?&]oobCode=([A-Za-z0-9_\-]+)/) || [])[1];
+  return mode && code ? { mode, code } : null;
+}
+$('fColar').addEventListener('submit', e => {
+  e.preventDefault(); const r = lerLinkColado($('kLink').value);
+  if (!r) { $('kErr').textContent = 'Não reconheci esse link. Copie o link inteiro do e-mail (botão direito → Copiar endereço do link).'; return; }
+  $('kLink').value = '';
+  history.replaceState(null, '', location.pathname + '?mode=' + encodeURIComponent(r.mode) + '&oobCode=' + encodeURIComponent(r.code));
+  tratarLinkDeEmail();
+});
 $('fSenha').addEventListener('submit', async e => {
   e.preventDefault(); $('tErr').textContent = ''; const s1 = $('tSenha').value, s2 = $('tSenha2').value;
   if (s1.length < 8) { $('tErr').textContent = 'A senha precisa ter pelo menos 8 caracteres.'; return; }
@@ -141,7 +156,7 @@ async function entrarNoSistema(u) {
   if (me !== eu) return;
   if (!eu.verificado && !(conv && conv.conta_admin)) { $('vEmail').textContent = u.email; authMode('verify'); return; }
   if (!conv || !conv.ativo) {
-    $('bEmail').textContent = u.email; authMode('blocked');
+    authMode('blocked');
     $('pBlocked').querySelector('p').innerHTML = semRede
       ? 'Não consegui confirmar o acesso de <b>' + esc(u.email) + '</b> porque o aparelho está sem internet. Conecte e toque em Tentar de novo.'
       : 'O e-mail <b>' + esc(u.email) + '</b> ainda não está liberado para usar o sistema. Peça ao administrador para liberar o seu acesso.';
@@ -193,7 +208,8 @@ function assinar() {
   }, e => status('Não consegui carregar os lançamentos: ' + errMsg(e), true));
 }
 
-function ligarLogin() { Store.aoMudarLogin(u => {
+let loginLigado = false;
+function ligarLogin() { loginLigado = true; Store.aoMudarLogin(u => {
   if (unsub) { unsub(); unsub = null; }
   if (!u) { me = null; authMode('login'); return; }
   me = { uid: u.uid, email: u.email, verificado: u.verificado };
@@ -664,7 +680,7 @@ function tratarLinkDeEmail() {
   const limpar = () => history.replaceState(null, '', location.pathname);
   authMode('action'); $('pAction').hidden = false; $('fNova').hidden = true; $('aCont').hidden = true; $('aMsg').textContent = 'Verificando o link…';
   let emailReset = '';
-  $('btnAContinuar').onclick = () => { limpar(); if (emailReset) { $('lEmail').value = emailReset; } ligarLogin(); };
+  $('btnAContinuar').onclick = () => { limpar(); if (emailReset) { $('lEmail').value = emailReset; } if (!loginLigado) ligarLogin(); else if (me) entrarNoSistema(me); else authMode('login'); };
   if (mode === 'verifyEmail') {
     Store.aplicarCodigo(code).then(() => { $('aMsg').innerHTML = '<span class="ok-txt"><b>E-mail confirmado!</b></span> Toque em Continuar para entrar.'; })
       .catch(e => { $('aMsg').textContent = e && e.code === 'auth/invalid-action-code' ? 'Este link já foi usado ou expirou. Se o e-mail já foi confirmado, é só continuar. Se não, entre e toque em Reenviar e-mail.' : 'Não consegui confirmar: ' + authErr(e); })
