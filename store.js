@@ -109,6 +109,24 @@
       return b.commit();
     },
 
+    // ---------- fechamento do período (envio ao administrador / aprovação) ----------
+    //   usuarios/{uid}/fechamentos/{AAAA-MM} { status: enviado|aprovado|devolvido, de, ate, total, qtd, itens:[{id,data,valor}],
+    //                                          historico:[{acao,quando,por,motivo}], enviado_em, avaliado_em, avaliado_por, avaliado_nome, motivo }
+    ouvirFechamento(uid, ciclo, cb, erro) {
+      return db.collection('usuarios').doc(uid).collection('fechamentos').doc(ciclo)
+        .onSnapshot(d => cb(d.exists ? d.data({ serverTimestamps: 'estimate' }) : null), e => erro && erro(e));
+    },
+    async lerFechamento(uid, ciclo) { const d = await db.collection('usuarios').doc(uid).collection('fechamentos').doc(ciclo).get(); return d.exists ? d.data() : null; },
+    enviarFechamento(uid, ciclo, dados, jaExiste) {
+      const ref = db.collection('usuarios').doc(uid).collection('fechamentos').doc(ciclo);
+      const d = { ...dados, enviado_em: FV.serverTimestamp() };
+      return jaExiste ? ref.update(d) : ref.set(d);
+    },
+    avaliarFechamento(uid, ciclo, dados) {
+      return db.collection('usuarios').doc(uid).collection('fechamentos').doc(ciclo)
+        .update({ ...dados, avaliado_em: FV.serverTimestamp(), avaliado_por: (auth.currentUser.email || '').toLowerCase() });
+    },
+
     // ---------- cupons (foto guardada no próprio banco, até ~900 KB por página) ----------
     salvarCupom(uid, id, paginas, antigas) {
       const u = db.collection('usuarios').doc(uid);

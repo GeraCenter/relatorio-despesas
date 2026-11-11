@@ -1,5 +1,5 @@
 // Guarda o site no aparelho para abrir sem internet. Ao publicar versão nova, mude o número abaixo.
-const CACHE = 'relatorio-despesas-2.3.0';
+const CACHE = 'relatorio-despesas-2.4.0';
 const FILES = ['./', 'index.html', 'app.js', 'store.js', 'config.js', 'manifest.webmanifest',
   'lib/firebase-app-compat.js', 'lib/firebase-auth-compat.js', 'lib/firebase-firestore-compat.js',
   'lib/jspdf.umd.min.js', 'lib/jspdf.plugin.autotable.min.js', 'lib/pdf.min.js', 'lib/pdf.worker.min.js',

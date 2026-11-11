@@ -1,6 +1,6 @@
 (function () {
 'use strict';
-const APPVER = '2.3.0';
+const APPVER = '2.4.0';
 const $ = id => document.getElementById(id);
 const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -29,6 +29,10 @@ let viewUid = null;         // de quem é o relatório na tela
 let profile = { ...DEF };   // perfil do relatório na tela
 let lancs = [];
 let unsub = null;
+let fech = null, unsubFech = null;   // situação do período na tela (enviado / aprovado / devolvido)
+const travado = () => !!fech && (fech.status === 'enviado' || fech.status === 'aprovado');
+const podeEditar = () => !readOnly() && !travado();
+function pararOuvir() { if (unsub) { unsub(); unsub = null; } if (unsubFech) { unsubFech(); unsubFech = null; } }
 let editingId = null, confirmId = null;
 let LOGO = null;
 const readOnly = () => viewUid !== (me && me.uid);
@@ -175,6 +179,7 @@ async function entrarNoSistema(u) {
   curKey = cycleKeyFor(new Date(), myProfile.fech);
   abrirMeus();
   show('view-app');
+  if (isAdmin) atualizarPendencias();
   if (novoPerfil || !myProfile.nome) { $('cfg').open = true; $('pMsg').textContent = 'Primeiro acesso: preencha seus dados e clique em Salvar dados. Eles aparecem no relatório.'; }
 }
 
@@ -197,7 +202,7 @@ $('tabAdmin').addEventListener('click', abrirAdmin);
 $('btnRoBack').addEventListener('click', abrirAdmin);
 
 function assinar() {
-  if (unsub) { unsub(); unsub = null; }
+  pararOuvir();
   lancs = []; render();
   const { start, end } = cycleRange(curKey);
   unsub = Store.ouvirLancamentos(viewUid, iso(start), iso(end), (list, doCache) => {
@@ -206,11 +211,13 @@ function assinar() {
     if (pend) status(pend + ' lançamento' + (pend > 1 ? 's' : '') + ' aguardando internet para sincronizar.', true);
     else status(doCache ? 'Sem conexão: mostrando o que está guardado no aparelho.' : 'Tudo sincronizado.', doCache);
   }, e => status('Não consegui carregar os lançamentos: ' + errMsg(e), true));
+  fech = null; const k = curKey, uid = viewUid;
+  unsubFech = Store.ouvirFechamento(uid, k, f => { if (k !== curKey || uid !== viewUid) return; fech = f; if (travado() && editingId) resetForm(); render(); }, () => {});
 }
 
 let loginLigado = false;
 function ligarLogin() { loginLigado = true; Store.aoMudarLogin(u => {
-  if (unsub) { unsub(); unsub = null; }
+  pararOuvir();
   if (!u) { me = null; authMode('login'); return; }
   me = { uid: u.uid, email: u.email, verificado: u.verificado };
   entrarNoSistema(me);
@@ -246,10 +253,10 @@ function render() {
   else $('daysLeft').textContent = today > end ? 'Ciclo encerrado.' : 'Ciclo futuro.';
   $('count').textContent = it.length ? it.length + ' lançamento' + (it.length > 1 ? 's' : '') : '';
   const ds = [...new Set(it.map(x => x.descricao))]; $('descs').innerHTML = ds.map(p => '<option value="' + esc(p) + '">').join('');
-  renderList(it); renderSheet(it, tot, porCat);
+  renderList(it); renderSheet(it, tot, porCat); renderFech();
 }
 function renderList(it) {
-  const ro = readOnly();
+  const ro = readOnly(), lock = !podeEditar();
   if (!it.length) { $('list').innerHTML = '<div class="empty"><b>Nenhuma despesa neste ciclo</b>' + (ro ? 'Este funcionário ainda não lançou nada neste ciclo.' : 'Preencha o formulário acima com a data, a categoria, a descrição e o valor. No celular, toque em <b>Tirar foto</b> para anexar o cupom.') + '</div>'; return; }
   let h = '<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Descrição</th><th class="r">Valor</th><th></th></tr></thead><tbody>';
   it.forEach(x => {
@@ -258,7 +265,7 @@ function renderList(it) {
       '</td><td class="r num">' + brl(x.valor) + '</td><td class="r">';
     if (confirmId === x.id) h += '<span class="confirm">Excluir? <button class="link danger" data-act="del" data-id="' + x.id + '">Sim</button><button class="link" data-act="nodel">Não</button></span>';
     else h += (x.cupom ? '<button class="icon-btn" data-act="view" data-id="' + x.id + '" title="Ver cupom" aria-label="Ver cupom">' + CLIP + '</button>' : '') +
-      (ro ? '' : '<button class="link" data-act="edit" data-id="' + x.id + '">Editar</button><button class="link danger" data-act="ask" data-id="' + x.id + '">Excluir</button>');
+      (lock ? '' : '<button class="link" data-act="edit" data-id="' + x.id + '">Editar</button><button class="link danger" data-act="ask" data-id="' + x.id + '">Excluir</button>');
     h += '</td></tr>';
   });
   $('list').innerHTML = h + '</tbody></table></div>';
@@ -275,14 +282,14 @@ function renderSheet(it, tot, porCat) {
   $('sheet').innerHTML =
     '<div class="sh-head"><img src="icons/logo.png" alt="Gera Center"><h3>Relatório de Despesas<br>Cartão Corporativo</h3></div>' +
     '<div class="meta num"><div><span>Colaborador:</span> ' + esc(p.nome || '________________') + '</div><div><span>Empresa:</span> ' + esc(p.empresa || '—') + '</div>' +
-    '<div><span>Cargo/Depto:</span> ' + esc(p.cargo || '—') + '</div>' +
-    '<div><span>Cartão:</span> ' + esc(cardTxt()) + '</div><div><span>Veículo:</span> ' + esc(p.placa || '—') + '</div>' +
+    '<div><span>Cargo/Depto:</span> ' + esc(p.cargo || '—') + '</div><div><span>Cartão:</span> ' + esc(cardTxt()) + '</div>' +
     '<div><span>Fatura:</span> ' + refMonth() + '</div><div><span>Período:</span> ' + periodText() + '</div></div>' +
     '<table class="num"><thead><tr><th>#</th><th>Data</th><th>Categoria</th><th>Descrição</th><th>Cupom/NF</th><th class="r">Valor</th></tr></thead><tbody>' + rows +
     '<tr class="tot"><td colspan="5">Total</td><td class="r">' + brl(tot) + '</td></tr></tbody></table>' +
     (Object.keys(porCat || {}).length > 1 ? '<div class="decl"><span style="color:#666">Por categoria:</span> ' + esc(catResumo(porCat)) + '</div>' : '') +
     '<div class="meta num"><div><span>Limite do ciclo:</span> ' + brl(L) + '</div><div><span>Saldo:</span> ' + brl(L - tot) + (tot > L ? ' (excedido)' : '') + '</div></div>' +
     '<div class="decl">' + DECL + '</div>' +
+    (fech && fech.status === 'aprovado' ? '<div class="decl"><b>Aprovado</b> por ' + esc(fech.avaliado_nome || fech.avaliado_por || '') + ' em ' + quando(fech.avaliado_em) + '.</div>' : '') +
     '<div class="sigs"><div class="sig">' + (esc(p.nome) || '&nbsp;') + '<small>Data ___/___/____</small></div></div>';
 }
 $('prev').addEventListener('click', () => { curKey = shiftKey(curKey, -1); confirmId = null; if (!$('view-admin').hidden) carregarAdmin(); else { if (!readOnly()) resetForm(); assinar(); } });
@@ -368,7 +375,7 @@ function resetForm() { editingId = null; $('form').reset(); $('iData').value = d
 $('btnCancel').addEventListener('click', () => { resetForm(); render(); });
 
 $('form').addEventListener('submit', e => {
-  e.preventDefault(); if (readOnly()) return;
+  e.preventDefault(); if (!podeEditar()) { $('formErr').textContent = 'Este período já foi enviado e está bloqueado.'; return; }
   const data = $('iData').value, descricao = $('iDesc').value.trim(), categoria = $('iCat').value, valor = parseNum($('iValor').value);
   const err = m => { $('formErr').textContent = m; };
   if (!data) return err('Informe a data da despesa.');
@@ -402,7 +409,7 @@ $('list').addEventListener('click', async e => {
     catch (er) { $('vBody').innerHTML = '<span class="bad-txt">Não consegui abrir o cupom: ' + esc(errMsg(er)) + '</span>'; }
     return;
   }
-  if (readOnly()) return;
+  if (!podeEditar()) return;
   if (act === 'ask') confirmId = id;
   else if (act === 'nodel') confirmId = null;
   else if (act === 'del' && x) { confirmId = null; if (editingId === id) resetForm(); Store.excluirLancamento(me.uid, id, x.cupom ? x.cupom.paginas : 0).catch(er => status('Não consegui excluir: ' + errMsg(er), true)); }
@@ -416,11 +423,118 @@ $('list').addEventListener('click', async e => {
 });
 
 // ======================================================================
+// Envio ao administrador, aprovação e devolução
+// ======================================================================
+const dt = v => !v ? null : v.toDate ? v.toDate() : new Date(v);
+const quando = v => { const d = dt(v); return d ? d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'; };
+const fotografia = it => it.map(x => ({ id: x.id, data: x.data, valor: x.valor })).sort((a, b) => a.id.localeCompare(b.id));
+function nomeFatura(k) { const [y, m] = k.split('-').map(Number); return MESES[m - 1] + '/' + y; }
+function envioTag(f) {
+  if (!f) return '<span class="hint">Não enviado</span>';
+  if (f.status === 'enviado') return '<span class="warn-txt">Aguardando aprovação</span><div class="hint">' + quando(f.enviado_em) + '</div>';
+  if (f.status === 'aprovado') return '<span class="ok-txt">Aprovado</span><div class="hint">' + quando(f.avaliado_em) + '</div>';
+  return '<span class="bad-txt">Devolvido</span><div class="hint">' + quando(f.avaliado_em) + '</div>';
+}
+// confere se os lançamentos mudaram depois do envio (o servidor registra a hora de cada alteração)
+function divergencias(it) {
+  if (!fech || !fech.itens) return [];
+  const msgs = []; const antes = JSON.stringify(fech.itens), agora = JSON.stringify(fotografia(it));
+  if (antes !== agora) {
+    const a = new Map(fech.itens.map(x => [x.id, x])), b = new Map(it.map(x => [x.id, x]));
+    const novos = it.filter(x => !a.has(x.id)).length, sumiu = fech.itens.filter(x => !b.has(x.id)).length;
+    const mud = it.filter(x => a.has(x.id) && (a.get(x.id).valor !== x.valor || a.get(x.id).data !== x.data)).length;
+    msgs.push('Atenção: os lançamentos mudaram depois do envio (' + [novos ? novos + ' incluído(s)' : '', sumiu ? sumiu + ' excluído(s)' : '', mud ? mud + ' alterado(s)' : ''].filter(Boolean).join(', ') + ').');
+  }
+  const env = dt(fech.enviado_em);
+  if (env) { const dep = it.filter(x => dt(x.alterado_em) && dt(x.alterado_em) > env).length; if (dep && !msgs.length) msgs.push('Atenção: ' + dep + ' lançamento(s) editado(s) depois do envio.'); }
+  return msgs;
+}
+function renderFech() {
+  const ro = readOnly(), f = fech, b = $('fechBanner');
+  const quem = ro ? (profile.nome || profile.email || 'O funcionário') : 'Você';
+  b.className = 'fech'; b.hidden = !f;
+  if (f && f.status === 'enviado') { b.classList.add('env'); b.innerHTML = '<b>Enviado para aprovação</b><span>' + esc(quem) + ' enviou este período em ' + quando(f.enviado_em) + '. Os lançamentos estão bloqueados.' + (ro ? '' : ' Se precisar alterar algo, peça ao administrador para devolver.') + '</span>'; }
+  else if (f && f.status === 'aprovado') { b.classList.add('apr'); b.innerHTML = '<b>Aprovado</b><span>Aprovado por ' + esc(f.avaliado_nome || f.avaliado_por || '') + ' em ' + quando(f.avaliado_em) + '. Os lançamentos estão bloqueados.</span>'; }
+  else if (f && f.status === 'devolvido') { b.classList.add('dev'); b.innerHTML = '<b>Devolvido para correção</b><span>Por ' + esc(f.avaliado_nome || f.avaliado_por || '') + ' em ' + quando(f.avaliado_em) + (ro ? '. Aguardando o funcionário corrigir e reenviar.' : '. Faça as correções e envie de novo.') + '</span>' + (f.motivo ? '<div class="motivo">' + esc(f.motivo) + '</div>' : ''); }
+  if (!ro) $('formPanel').hidden = travado();
+  $('envioBox').hidden = ro || travado();
+  if (!ro) { $('btnEnviar').textContent = f && f.status === 'devolvido' ? 'Reenviar ao administrador' : 'Enviar ao administrador'; }
+  const podeAvaliar = isAdmin && f && (f.status === 'enviado' || f.status === 'aprovado');
+  $('avalBox').hidden = !podeAvaliar;
+  if (podeAvaliar) {
+    $('btnAprovar').hidden = f.status !== 'enviado';
+    $('btnDevolver').textContent = f.status === 'aprovado' ? 'Reabrir para correção' : 'Devolver para correção';
+    const d = divergencias(items()); $('avalAlerta').hidden = !d.length; $('avalAlerta').textContent = d.join(' ');
+  }
+  const h = (f && f.historico) || []; $('histBox').hidden = !h.length;
+  $('histList').innerHTML = h.slice().reverse().map(x => '<li><b>' + esc({ enviado: 'Enviado', aprovado: 'Aprovado', devolvido: 'Devolvido' }[x.acao] || x.acao) + '</b> · ' + quando(x.quando) + ' · ' + esc(x.nome || x.por || '') + (x.motivo ? '<span class="m">' + esc(x.motivo) + '</span>' : '') + '</li>').join('');
+}
+$('btnEnviar').addEventListener('click', () => {
+  const { it, tot } = totals(); $('envHint').textContent = '';
+  if (!it.length) { $('envHint').textContent = 'Não há lançamentos neste período para enviar.'; return; }
+  if (it.some(x => x.pendente)) { $('envHint').textContent = 'Há lançamentos aguardando internet para sincronizar. Conecte e tente de novo.'; return; }
+  const sem = it.filter(x => !x.cupom).length;
+  $('envTxt').innerHTML = 'Enviar o relatório da fatura <b>' + nomeFatura(curKey) + '</b> (' + it.length + ' lançamento' + (it.length > 1 ? 's' : '') + ', total <b>' + brl(tot) + '</b>) ao administrador?<br>Depois de enviar, este período fica <b>bloqueado</b> para alterações.' +
+    (sem ? '<br><span class="warn-txt"><b>Atenção:</b> ' + sem + ' lançamento' + (sem > 1 ? 's estão' : ' está') + ' sem cupom anexado.</span>' : '');
+  $('envConfirm').hidden = false; $('btnEnviar').hidden = true;
+});
+$('btnEnvNao').addEventListener('click', () => { $('envConfirm').hidden = true; $('btnEnviar').hidden = false; });
+$('btnEnvSim').addEventListener('click', async () => {
+  const { it, tot } = totals(); const { start, end } = cycleRange(curKey);
+  $('btnEnvSim').disabled = true;
+  try {
+    await Store.enviarFechamento(me.uid, curKey, { status: 'enviado', de: iso(start), ate: iso(end), total: Math.round(tot * 100) / 100, qtd: it.length, itens: fotografia(it),
+      historico: [...((fech && fech.historico) || []), { acao: 'enviado', quando: new Date().toISOString(), por: me.email, nome: myProfile.nome || '' }] }, !!fech);
+    $('envConfirm').hidden = true; $('btnEnviar').hidden = false; $('envHint').textContent = 'Quando terminar os lançamentos deste período, envie para aprovação.';
+    if (editingId) resetForm();
+  } catch (e) { $('envHint').textContent = 'Não consegui enviar: ' + errMsg(e); $('envConfirm').hidden = true; $('btnEnviar').hidden = false; }
+  finally { $('btnEnvSim').disabled = false; }
+});
+async function avaliar(status, motivo) {
+  const reg = { acao: status, quando: new Date().toISOString(), por: me.email, nome: myProfile.nome || '' }; if (motivo) reg.motivo = motivo;
+  await Store.avaliarFechamento(viewUid, curKey, { status, motivo: motivo || (fech && fech.motivo) || '', avaliado_nome: myProfile.nome || me.email, historico: [...((fech && fech.historico) || []), reg] });
+  atualizarPendencias();
+}
+$('btnAprovar').addEventListener('click', async () => {
+  $('avalMsg').textContent = ''; $('btnAprovar').disabled = true;
+  try { await avaliar('aprovado'); $('avalMsg').textContent = 'Aprovado.'; } catch (e) { $('avalMsg').textContent = 'Não consegui aprovar: ' + errMsg(e); }
+  finally { $('btnAprovar').disabled = false; }
+});
+$('btnDevolver').addEventListener('click', () => { $('devMotivo').value = ''; $('devErr').textContent = ''; $('devQuem').textContent = (profile.nome || profile.email || '') + ' · fatura ' + nomeFatura(curKey); $('dlgDev').showModal(); $('devMotivo').focus(); });
+$('btnDevCancel').addEventListener('click', () => $('dlgDev').close());
+$('btnDevOk').addEventListener('click', async () => {
+  const m = $('devMotivo').value.trim(); if (m.length < 3) { $('devErr').textContent = 'Escreva o que precisa ser corrigido.'; return; }
+  $('btnDevOk').disabled = true;
+  try { await avaliar('devolvido', m); $('dlgDev').close(); $('avalMsg').textContent = 'Devolvido para correção.'; } catch (e) { $('devErr').textContent = 'Não consegui devolver: ' + errMsg(e); }
+  finally { $('btnDevOk').disabled = false; }
+});
+// pendências do administrador: períodos enviados (ciclo atual e anterior de cada funcionário)
+let pendencias = [];
+async function atualizarPendencias() {
+  if (!isAdmin) return;
+  try {
+    const [cs, us] = await Promise.all([Store.listarConvites(), Store.listarUsuarios()]);
+    const ativos = new Set(cs.filter(c => c.ativo).map(c => c.email));
+    const lista = [];
+    await Promise.all(us.filter(u => ativos.has((u.email || '').toLowerCase())).map(async u => {
+      const k0 = cycleKeyFor(new Date(), u.fech || 25);
+      for (const k of [shiftKey(k0, -1), k0]) { const f = await Store.lerFechamento(u.uid, k).catch(() => null); if (f && f.status === 'enviado') lista.push({ u, k, f }); }
+    }));
+    pendencias = lista.sort((a, b) => (dt(a.f.enviado_em) || 0) - (dt(b.f.enviado_em) || 0));
+    $('admBadge').hidden = !pendencias.length; $('admBadge').textContent = pendencias.length;
+    $('pendHint').textContent = pendencias.length ? pendencias.length + ' relatório' + (pendencias.length > 1 ? 's' : '') : '';
+    $('pendList').innerHTML = pendencias.length ? pendencias.map((p, i) => '<div class="pend-row"><div><b>' + esc(p.u.nome || p.u.email) + '</b> · fatura ' + nomeFatura(p.k) + '<div class="hint">Enviado em ' + quando(p.f.enviado_em) + ' · ' + (p.f.qtd || 0) + ' lançamento(s) · ' + brl(p.f.total || 0) + '</div></div><button class="primary" data-pend="' + i + '">Avaliar</button></div>').join('')
+      : '<span class="hint">Nenhum relatório aguardando aprovação.</span>';
+  } catch (e) { $('pendList').innerHTML = '<span class="bad-txt">Não consegui carregar as pendências: ' + esc(errMsg(e)) + '</span>'; }
+}
+$('pendList').addEventListener('click', e => { const b = e.target.closest('[data-pend]'); if (!b) return; const p = pendencias[+b.dataset.pend]; if (!p) return; curKey = p.k; abrirDeOutro(p.u); });
+
+// ======================================================================
 // Meus dados
 // ======================================================================
 function fillProfileForm() {
   const p = myProfile; $('pNome').value = p.nome || ''; $('pCargo').value = p.cargo || ''; $('pCartao').value = p.cartao || ''; $('pEmissor').value = p.emissor || '';
-  $('pPlaca').value = p.placa || ''; $('pEmpresa').value = p.empresa || ''; $('pLimite').value = n2(p.limite); $('pFech').value = p.fech;
+  $('pEmpresa').value = p.empresa || ''; $('pLimite').value = n2(p.limite); $('pFech').value = p.fech;
 }
 $('pform').addEventListener('submit', e => {
   e.preventDefault();
@@ -429,7 +543,7 @@ $('pform').addEventListener('submit', e => {
   if (!(f >= 1 && f <= 28)) { $('pMsg').textContent = 'O dia de fechamento deve ficar entre 1 e 28.'; return; }
   const fechMudou = f !== myProfile.fech;
   myProfile = { nome: $('pNome').value.trim(), cargo: $('pCargo').value.trim(), emissor: $('pEmissor').value.trim(), cartao: $('pCartao').value.replace(/\D/g, '').slice(-4),
-    placa: $('pPlaca').value.trim(), empresa: $('pEmpresa').value.trim(), limite: lim, fech: f, email: me.email };
+    placa: myProfile.placa || '', empresa: $('pEmpresa').value.trim(), limite: lim, fech: f, email: me.email };
   Store.salvarPerfil(me.uid, myProfile).catch(x => $('pMsg').textContent = 'Não consegui salvar: ' + errMsg(x));
   $('whoName').textContent = myProfile.nome || me.email; $('whoEmail').textContent = myProfile.nome ? me.email : '';
   $('pMsg').textContent = 'Dados salvos.'; profile = myProfile;
@@ -462,10 +576,10 @@ async function buildPdf(withAtt) {
   doc.text('Cartão Corporativo', M + 36, 21);
   doc.setDrawColor(245, 180, 0); doc.setLineWidth(1); doc.line(M, 30, W - M, 30);
   doc.setTextColor(30); doc.setFontSize(9.5);
-  const meta = [['Colaborador', p.nome || ''], ['Empresa', p.empresa || '—'], ['Cargo/Depto', p.cargo || '—'], ['Cartão', cardTxt()], ['Veículo', p.placa || '—'], ['Fatura', refMonth()], ['Período', periodText()]];
+  const meta = [['Colaborador', p.nome || ''], ['Empresa', p.empresa || '—'], ['Cargo/Depto', p.cargo || '—'], ['Cartão', cardTxt()], ['Fatura', refMonth()], ['Período', periodText()]];
   meta.forEach((r, i) => { const x = i % 2 ? W / 2 + 4 : M, y = 37 + Math.floor(i / 2) * 6; doc.setFont('helvetica', 'normal'); doc.setTextColor(100); doc.text(r[0] + ':', x, y); doc.setTextColor(20); doc.setFont('helvetica', 'bold'); doc.text(r[1] || '________________________', x + 27, y); });
   const body = it.map((x, i) => [i + 1, br(x.data), x.categoria, x.descricao, x.nf || '—', brl(x.valor)]);
-  doc.autoTable({ startY: 63, margin: { left: M, right: M }, head: [['#', 'Data', 'Categoria', 'Descrição', 'Cupom/NF', 'Valor']], body,
+  doc.autoTable({ startY: 57, margin: { left: M, right: M }, head: [['#', 'Data', 'Categoria', 'Descrição', 'Cupom/NF', 'Valor']], body,
     foot: [['', '', 'Total', '', '', brl(tot)]], theme: 'grid',
     styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 1.8, lineColor: [200, 200, 200], lineWidth: .2 },
     headStyles: { fillColor: [58, 58, 55], textColor: 255 }, footStyles: { fillColor: [253, 240, 204], textColor: 20, fontStyle: 'bold' },
@@ -475,6 +589,7 @@ async function buildPdf(withAtt) {
   doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(60);
   doc.text('Limite do ciclo: ' + brl(p.limite) + '     Saldo: ' + brl(p.limite - tot) + (tot > p.limite ? ' (excedido)' : ''), M, y); y += 8;
   const lines = doc.splitTextToSize(DECL, W - 2 * M); doc.text(lines, M, y); y += lines.length * 4.6 + 6;
+  if (fech && fech.status === 'aprovado') { doc.setFont('helvetica', 'bold'); doc.setTextColor(31, 122, 74); doc.text('Aprovado por ' + (fech.avaliado_nome || fech.avaliado_por || '') + ' em ' + quando(fech.avaliado_em) + '.', M, y); doc.setFont('helvetica', 'normal'); y += 8; }
   const sy = Math.max(y + 22, 250); doc.setDrawColor(40); doc.setLineWidth(.3);
   const cw = 100, sx = (W - cw) / 2;
   doc.line(sx, sy, sx + cw, sy); doc.setTextColor(20); doc.setFont('helvetica', 'bold'); doc.text(p.nome || '', sx + cw / 2, sy + 5, { align: 'center' });
@@ -556,7 +671,7 @@ $('impDir').addEventListener('change', async e => {
 let convites = [], usuarios = [];
 function abrirAdmin() {
   if (!isAdmin) return;
-  if (unsub) { unsub(); unsub = null; }
+  pararOuvir();
   viewUid = me.uid; profile = myProfile;
   $('tabMine').setAttribute('aria-selected', 'false'); $('tabAdmin').setAttribute('aria-selected', 'true');
   $('view-main').hidden = true; $('view-admin').hidden = false; $('roBanner').hidden = true;
@@ -565,25 +680,25 @@ function abrirAdmin() {
 async function carregarAdmin() {
   const [y, m] = curKey.split('-').map(Number);
   $('cycTitle').textContent = 'Fatura ' + MESES[m - 1] + '/' + y; $('cycRange').textContent = 'todos os funcionários';
-  $('repBody').innerHTML = '<tr><td colspan="6" class="hint">Carregando…</td></tr>';
+  $('repBody').innerHTML = '<tr><td colspan="7" class="hint">Carregando…</td></tr>';
   try { [convites, usuarios] = await Promise.all([Store.listarConvites(), Store.listarUsuarios()]); }
-  catch (e) { $('repBody').innerHTML = '<tr><td colspan="6" class="bad-txt">Não consegui carregar: ' + esc(errMsg(e)) + '</td></tr>'; return; }
-  renderConvites();
+  catch (e) { $('repBody').innerHTML = '<tr><td colspan="7" class="bad-txt">Não consegui carregar: ' + esc(errMsg(e)) + '</td></tr>'; return; }
+  renderConvites(); atualizarPendencias();
   const ativos = new Set(convites.filter(c => c.ativo).map(c => c.email));
   const lista = usuarios.filter(u => ativos.has((u.email || '').toLowerCase())).sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email, 'pt-BR'));
   const linhas = await Promise.all(lista.map(async u => {
     const F = u.fech || 25; const { start, end } = cycleRange(curKey, F);
-    try { const ls = (await Store.lancamentosPeriodo(u.uid, iso(start), iso(end))).map(norm); return { u, ls }; } catch (e) { return { u, ls: null, e }; }
+    try { const [ls, f] = await Promise.all([Store.lancamentosPeriodo(u.uid, iso(start), iso(end)), Store.lerFechamento(u.uid, curKey).catch(() => null)]); return { u, ls: ls.map(norm), f }; } catch (e) { return { u, ls: null, e }; }
   }));
   const semAcesso = convites.filter(c => c.ativo && !usuarios.some(u => (u.email || '').toLowerCase() === c.email));
   $('repHint').textContent = lista.length + ' funcionário' + (lista.length !== 1 ? 's' : '') + (semAcesso.length ? ' · ' + semAcesso.length + ' ainda não entrou' + (semAcesso.length > 1 ? 'aram' : '') : '');
-  $('repBody').innerHTML = linhas.map(({ u, ls, e }) => {
-    if (!ls) return '<tr><td>' + esc(u.nome || u.email) + '</td><td colspan="5" class="bad-txt">' + esc(errMsg(e)) + '</td></tr>';
+  $('repBody').innerHTML = linhas.map(({ u, ls, e, f }) => {
+    if (!ls) return '<tr><td>' + esc(u.nome || u.email) + '</td><td colspan="6" class="bad-txt">' + esc(errMsg(e)) + '</td></tr>';
     const tot = ls.reduce((s, x) => s + (Number(x.valor) || 0), 0); const sem = ls.filter(x => !x.cupom).length; const L = u.limite || 500;
     const sit = !ls.length ? '<span class="hint">Sem lançamentos</span>' : tot > L ? '<span class="bad-txt">Acima do limite</span>' : tot >= .85 * L ? '<span class="warn-txt">Perto do limite</span>' : '<span class="ok-txt">Dentro do limite</span>';
-    return '<tr><td>' + esc(u.nome || '—') + '<div class="hint">' + esc(u.email) + '</div></td><td class="r num">' + ls.length + '</td><td class="r num">' + brl(tot) + '</td><td class="r num ' + (sem ? 'warn-txt' : '') + '">' + sem + '</td><td>' + sit + '</td><td class="r"><button class="link" data-ver="' + u.uid + '">Ver relatório</button></td></tr>';
-  }).join('') + semAcesso.map(c => '<tr><td>' + esc(c.nome || '—') + '<div class="hint">' + esc(c.email) + '</div></td><td colspan="4" class="hint">Ainda não fez o primeiro acesso</td><td></td></tr>').join('')
-    || '<tr><td colspan="6" class="hint">Nenhum funcionário ainda. Libere o acesso no quadro abaixo.</td></tr>';
+    return '<tr><td>' + esc(u.nome || '—') + '<div class="hint">' + esc(u.email) + '</div></td><td class="r num">' + ls.length + '</td><td class="r num">' + brl(tot) + '</td><td class="r num ' + (sem ? 'warn-txt' : '') + '">' + sem + '</td><td>' + sit + '</td><td>' + envioTag(f) + '</td><td class="r"><button class="link" data-ver="' + u.uid + '">' + (f && f.status === 'enviado' ? 'Avaliar' : 'Ver relatório') + '</button></td></tr>';
+  }).join('') + semAcesso.map(c => '<tr><td>' + esc(c.nome || '—') + '<div class="hint">' + esc(c.email) + '</div></td><td colspan="5" class="hint">Ainda não fez o primeiro acesso</td><td></td></tr>').join('')
+    || '<tr><td colspan="7" class="hint">Nenhum funcionário ainda. Libere o acesso no quadro abaixo.</td></tr>';
 }
 $('repBody').addEventListener('click', e => { const b = e.target.closest('[data-ver]'); if (!b) return; const u = usuarios.find(x => x.uid === b.dataset.ver); if (u) abrirDeOutro(u); });
 function renderConvites() {

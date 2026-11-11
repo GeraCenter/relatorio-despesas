@@ -140,7 +140,7 @@ details.cfg[open] summary{margin-bottom:12px}
   .att-page img{max-width:100%;max-height:100%;object-fit:contain}
   @page{size:A4;margin:0}
   body{background:#fff;padding:0}
-  .wrap>header,.tabs,.ro-banner,.col:not(.preview-panel),#view-admin,.panel-head,.dl-row,#syncMsg,.backup{display:none!important}
+  .wrap>header,.tabs,.ro-banner,.col:not(.preview-panel),#view-admin,.envio,#histBox,.fech,.panel-head,.dl-row,#syncMsg,.backup{display:none!important}
   .wrap,.grid,.col,.panel{display:block;border:none;padding:0;margin:0;max-width:none;background:#fff;position:static}
   .sheet{box-shadow:none;border:none;border-radius:0;width:210mm;height:297mm;aspect-ratio:auto;padding:16mm 16mm 18mm;font-size:11pt}
   .sheet table{font-size:10pt}.sheet .decl,.sheet .sig{font-size:10pt}
@@ -176,6 +176,21 @@ details.cfg[open] summary{margin-bottom:12px}
 .ok-txt{color:var(--ok)} .warn-txt{color:var(--amber)} .bad-txt{color:var(--danger)}
 .wait{display:grid;place-items:center;min-height:60vh;color:var(--muted)}
 
+.fech{border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:.92rem;background:var(--surface);display:flex;flex-direction:column;gap:4px}
+.fech b{font-family:var(--f-display);font-size:1.05rem}
+.fech.env{border-color:var(--amber)} .fech.env b{color:var(--amber)}
+.fech.apr{border-color:var(--ok)} .fech.apr b{color:var(--ok)}
+.fech.dev{border-color:var(--danger)} .fech.dev b{color:var(--danger)}
+.fech .motivo{white-space:pre-wrap;background:var(--soft);border-radius:8px;padding:8px 10px;margin-top:4px}
+.envio{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:12px}
+.confirm-box{border:1px solid var(--amber);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.confirm-box p{margin:0}
+.alerta{border:1px solid var(--danger);color:var(--danger);border-radius:10px;padding:10px 12px;font-size:.9rem;font-weight:600}
+.hist{margin:0;padding-left:18px;font-size:.85rem;display:flex;flex-direction:column;gap:4px}
+.hist .m{display:block;color:var(--muted);white-space:pre-wrap}
+.badge{display:inline-block;background:var(--danger);color:#fff;border-radius:99px;padding:0 7px;font-size:.72rem;line-height:1.5;margin-left:4px;vertical-align:middle}
+.pend-row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)}
+.pend-row:first-child{border-top:none}
 dialog.viewer{border:none;border-radius:12px;padding:0;max-width:min(96vw,900px);width:100%;background:var(--surface);color:var(--fg)}
 dialog.viewer::backdrop{background:rgba(0,0,0,.6)}
 dialog.viewer .vh{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
@@ -289,13 +304,14 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
 
   <nav class="tabs" id="tabs" role="tablist" hidden>
     <button role="tab" id="tabMine" aria-selected="true">Meus lançamentos</button>
-    <button role="tab" id="tabAdmin" aria-selected="false">Administração</button>
+    <button role="tab" id="tabAdmin" aria-selected="false">Administração <span class="badge" id="admBadge" hidden></span></button>
   </nav>
 
   <div class="ro-banner" id="roBanner" hidden><span id="roTxt">Visualizando</span><button id="btnRoBack">Voltar para a administração</button></div>
 
   <div class="grid" id="view-main">
     <div class="col">
+      <div class="fech" id="fechBanner" role="status" hidden></div>
       <section class="panel" aria-labelledby="h-gauge">
         <div class="panel-head"><h2 id="h-gauge">Limite do ciclo</h2><span id="pill" class="pill ok">Dentro do limite</span></div>
         <div class="gauge">
@@ -353,10 +369,9 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
             <div class="f s3"><label class="label" for="pCargo">Cargo / Departamento</label><input id="pCargo"></div>
             <div class="f s3"><label class="label" for="pEmissor">Cartão (banco / bandeira)</label><input id="pEmissor" placeholder="Ex.: Itaú Mastercard"></div>
             <div class="f s3"><label class="label" for="pCartao">Cartão (final)</label><input id="pCartao" inputmode="numeric" maxlength="4" placeholder="4 dígitos"></div>
-            <div class="f s3"><label class="label" for="pPlaca">Veículo / placa</label><input id="pPlaca"></div>
-            <div class="f s3"><label class="label" for="pEmpresa">Empresa</label><input id="pEmpresa"></div>
-            <div class="f s3"><label class="label" for="pLimite">Limite mensal (R$)</label><input id="pLimite" inputmode="decimal"></div>
-            <div class="f s3"><label class="label" for="pFech">Dia de fechamento</label><input id="pFech" inputmode="numeric"></div>
+            <div class="f s2"><label class="label" for="pEmpresa">Empresa</label><input id="pEmpresa"></div>
+            <div class="f s2"><label class="label" for="pLimite">Limite mensal (R$)</label><input id="pLimite" inputmode="decimal"></div>
+            <div class="f s2"><label class="label" for="pFech">Dia de fechamento</label><input id="pFech" inputmode="numeric"></div>
             <div class="form-actions"><button class="primary" type="submit">Salvar dados</button><span class="hint" id="pMsg"></span></div>
           </form>
         </details>
@@ -379,6 +394,18 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
           <button id="btnPdf">Salvar PDF</button>
           <span class="status" id="pdfMsg"></span>
         </div>
+        <div class="envio" id="envioBox" hidden>
+          <div class="dl-row"><button class="primary" id="btnEnviar">Enviar ao administrador</button><span class="hint" id="envHint">Quando terminar os lançamentos deste período, envie para aprovação.</span></div>
+          <div class="confirm-box" id="envConfirm" hidden>
+            <p id="envTxt"></p>
+            <div class="dl-row"><button class="primary" id="btnEnvSim">Sim, enviar</button><button id="btnEnvNao">Cancelar</button></div>
+          </div>
+        </div>
+        <div class="envio" id="avalBox" hidden>
+          <div class="alerta" id="avalAlerta" hidden></div>
+          <div class="dl-row"><button class="primary" id="btnAprovar">Aprovar</button><button id="btnDevolver">Devolver para correção</button><span class="hint" id="avalMsg"></span></div>
+        </div>
+        <details class="cfg" id="histBox" hidden><summary>Histórico deste período</summary><ul class="hist" id="histList"></ul></details>
         <div class="status" id="syncMsg"></div>
       </section>
     </div>
@@ -386,9 +413,14 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
 
   <!-- ============ ADMINISTRAÇÃO ============ -->
   <div class="adm-grid" id="view-admin" hidden>
+    <section class="panel" aria-labelledby="h-pend" id="pendPanel">
+      <div class="panel-head"><h2 id="h-pend">Aguardando aprovação</h2><span class="hint" id="pendHint"></span></div>
+      <div id="pendList"><span class="hint">Carregando…</span></div>
+    </section>
+
     <section class="panel" aria-labelledby="h-rep">
       <div class="panel-head"><h2 id="h-rep">Relatórios do ciclo</h2><span class="hint" id="repHint"></span></div>
-      <div class="tbl-wrap"><table><thead><tr><th>Funcionário</th><th class="r">Lançamentos</th><th class="r">Total</th><th class="r">Sem cupom</th><th>Situação</th><th></th></tr></thead><tbody id="repBody"><tr><td colspan="6" class="hint">Carregando…</td></tr></tbody></table></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Funcionário</th><th class="r">Lançamentos</th><th class="r">Total</th><th class="r">Sem cupom</th><th>Limite</th><th>Envio</th><th></th></tr></thead><tbody id="repBody"><tr><td colspan="7" class="hint">Carregando…</td></tr></tbody></table></div>
     </section>
 
     <section class="panel" aria-labelledby="h-fun">
@@ -419,6 +451,16 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
   </div>
 </div>
 
+<dialog class="viewer" id="dlgDev" aria-labelledby="devTit">
+  <div class="vh"><b id="devTit">Devolver para correção</b></div>
+  <div class="vb" style="align-items:stretch">
+    <p class="hint" id="devQuem" style="margin:0"></p>
+    <label class="label" for="devMotivo">Observações / o que precisa ser corrigido (o funcionário vai ver)</label>
+    <textarea id="devMotivo" rows="5" maxlength="1000" style="font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);resize:vertical"></textarea>
+    <div class="err" id="devErr" role="alert"></div>
+    <div class="dl-row"><button class="primary" id="btnDevOk">Devolver</button><button id="btnDevCancel">Cancelar</button></div>
+  </div>
+</dialog>
 <dialog class="viewer" id="viewer"><div class="vh"><b id="vTitle">Cupom</b><button id="vClose">Fechar</button></div><div class="vb" id="vBody"></div></dialog>
 <div class="att-pages" id="attPages"></div>
 
