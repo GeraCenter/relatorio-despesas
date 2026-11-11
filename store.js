@@ -54,6 +54,7 @@
     async listarConvites() { const s = await db.collection('convites').get(); return s.docs.map(d => ({ email: d.id, ...d.data() })); },
     async salvarConvite(email, dados) {
       const d = { nome: dados.nome || '', ativo: !!dados.ativo, admin: !!dados.admin, alterado_em: FV.serverTimestamp() };
+      if ('aprovador' in dados) d.aprovador = !!dados.aprovador;
       if ('conta_admin' in dados) d.conta_admin = !!dados.conta_admin;
       if ('trocar_senha' in dados) d.trocar_senha = !!dados.trocar_senha;
       await db.collection('convites').doc(email.trim().toLowerCase()).set(d, { merge: true });

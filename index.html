@@ -172,7 +172,8 @@ details.cfg[open] summary{margin-bottom:12px}
 .adm-form{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;align-items:end}
 @media (max-width:560px){.adm-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .tag{display:inline-block;font-size:.72rem;font-weight:600;border-radius:99px;padding:1px 8px;border:1px solid currentColor}
-.tag.adm{color:var(--accent)} .tag.off{color:var(--danger)} .tag.on{color:var(--ok)}
+.tag.adm{color:var(--accent)} .tag.apr{color:var(--ok)}
+select.papel{width:auto;padding:4px 8px;font-size:.85rem} .tag.off{color:var(--danger)} .tag.on{color:var(--ok)}
 .ok-txt{color:var(--ok)} .warn-txt{color:var(--amber)} .bad-txt{color:var(--danger)}
 .wait{display:grid;place-items:center;min-height:60vh;color:var(--muted)}
 
@@ -304,7 +305,7 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
 
   <nav class="tabs" id="tabs" role="tablist" hidden>
     <button role="tab" id="tabMine" aria-selected="true">Meus lançamentos</button>
-    <button role="tab" id="tabAdmin" aria-selected="false">Administração <span class="badge" id="admBadge" hidden></span></button>
+    <button role="tab" id="tabAdmin" aria-selected="false"><span id="tabAdminTxt">Administração</span> <span class="badge" id="admBadge" hidden></span></button>
   </nav>
 
   <div class="ro-banner" id="roBanner" hidden><span id="roTxt">Visualizando</span><button id="btnRoBack">Voltar para a administração</button></div>
@@ -423,22 +424,23 @@ dialog.viewer img{max-width:100%;height:auto;background:#fff}
       <div class="tbl-wrap"><table><thead><tr><th>Funcionário</th><th class="r">Lançamentos</th><th class="r">Total</th><th class="r">Sem cupom</th><th>Limite</th><th>Envio</th><th></th></tr></thead><tbody id="repBody"><tr><td colspan="7" class="hint">Carregando…</td></tr></tbody></table></div>
     </section>
 
-    <section class="panel" aria-labelledby="h-fun">
+    <section class="panel" aria-labelledby="h-fun" id="funPanel">
       <div class="panel-head"><h2 id="h-fun">Funcionários com acesso</h2><span class="hint" id="funCount"></span></div>
       <form class="adm-form" id="fConv" novalidate>
         <div class="f s2"><label class="label" for="cEmail">E-mail</label><input id="cEmail" type="email" placeholder="nome@empresa.com.br"></div>
         <div class="f s2"><label class="label" for="cNome">Nome</label><input id="cNome"></div>
         <div class="f s2"><label class="label" for="cSenha">Senha provisória</label><input id="cSenha" autocomplete="off"></div>
-        <label class="chk s2"><input type="checkbox" id="cAdmin"> Administrador</label>
+        <div class="f s2"><label class="label" for="cPapel">Perfil</label><select id="cPapel"><option value="funcionario">Funcionário</option><option value="aprovador">Aprovador</option><option value="master">Master</option></select></div>
         <button class="primary s2" type="submit" id="btnConv">Criar acesso</button>
         <div class="err s6" id="cErr" role="alert"></div>
       </form>
       <div class="hint" id="cRes" hidden></div>
+      <p class="hint"><b>Perfis:</b> Funcionário lança as próprias despesas. Aprovador também vê e aprova os relatórios de todos. Master faz tudo, inclusive cadastrar pessoas e exportar.</p>
       <p class="hint">O sistema cria a conta com a senha provisória. Passe o e-mail e a senha para a pessoa; no primeiro login ela cria a senha dela.</p>
       <div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Situação</th><th></th></tr></thead><tbody id="convBody"></tbody></table></div>
     </section>
 
-    <section class="panel" aria-labelledby="h-exp">
+    <section class="panel" aria-labelledby="h-exp" id="expPanel">
       <div class="panel-head"><h2 id="h-exp">Exportar</h2></div>
       <div class="dl-row">
         <button id="btnCsv">Planilha do ciclo (Excel)</button>

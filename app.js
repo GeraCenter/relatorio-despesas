@@ -1,6 +1,6 @@
 (function () {
 'use strict';
-const APPVER = '2.4.0';
+const APPVER = '2.5.0';
 const $ = id => document.getElementById(id);
 const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -24,7 +24,10 @@ function show(view) { ['view-wait', 'view-auth', 'view-app'].forEach(v => $(v).h
 const DEF = { nome: '', cargo: '', emissor: '', cartao: '', placa: '', empresa: 'Gera Center', limite: 500, fech: 25 };
 let me = null;             // { uid, email }
 let myProfile = { ...DEF };
-let isAdmin = false;
+let isMaster = false, isAprov = false;   // master: tudo; aprovador: vê e aprova relatórios
+const papelDe = c => c && c.admin ? 'master' : c && c.aprovador ? 'aprovador' : 'funcionario';
+const flagsDe = p => ({ admin: p === 'master', aprovador: p === 'aprovador' });
+const NOME_PAPEL = { master: 'Master', aprovador: 'Aprovador', funcionario: 'Funcionário' };
 let viewUid = null;         // de quem é o relatório na tela
 let profile = { ...DEF };   // perfil do relatório na tela
 let lancs = [];
@@ -167,19 +170,19 @@ async function entrarNoSistema(u) {
     return;
   }
   if (conv.trocar_senha && !semRede) { $('tErr').textContent = ''; $('fSenha').reset(); authMode('senha'); return; }
-  try { localStorage.setItem('rg.conv.' + u.uid, JSON.stringify({ ativo: conv.ativo, admin: !!conv.admin, conta_admin: !!conv.conta_admin })); } catch (_) {}
-  isAdmin = !!conv.admin;
+  try { localStorage.setItem('rg.conv.' + u.uid, JSON.stringify({ ativo: conv.ativo, admin: !!conv.admin, aprovador: !!conv.aprovador, conta_admin: !!conv.conta_admin })); } catch (_) {}
+  isMaster = !!conv.admin; isAprov = isMaster || !!conv.aprovador;
   let p = null;
   try { p = await Store.perfil(u.uid); } catch (_) {}
   let novoPerfil = false;
   if (!p) { novoPerfil = true; p = { ...DEF, nome: conv.nome || '', email: u.email }; Store.salvarPerfil(u.uid, p).catch(e => status('Não consegui salvar seus dados: ' + errMsg(e), true)); }
   myProfile = { ...DEF, ...p, email: u.email };
   $('whoName').textContent = myProfile.nome || u.email; $('whoEmail').textContent = myProfile.nome ? u.email : '';
-  $('tabs').hidden = !isAdmin;
+  $('tabs').hidden = !isAprov; $('tabAdminTxt').textContent = isMaster ? 'Administração' : 'Aprovações';
   curKey = cycleKeyFor(new Date(), myProfile.fech);
   abrirMeus();
   show('view-app');
-  if (isAdmin) atualizarPendencias();
+  if (isAprov) atualizarPendencias();
   if (novoPerfil || !myProfile.nome) { $('cfg').open = true; $('pMsg').textContent = 'Primeiro acesso: preencha seus dados e clique em Salvar dados. Eles aparecem no relatório.'; }
 }
 
@@ -459,7 +462,7 @@ function renderFech() {
   if (!ro) $('formPanel').hidden = travado();
   $('envioBox').hidden = ro || travado();
   if (!ro) { $('btnEnviar').textContent = f && f.status === 'devolvido' ? 'Reenviar ao administrador' : 'Enviar ao administrador'; }
-  const podeAvaliar = isAdmin && f && (f.status === 'enviado' || f.status === 'aprovado');
+  const podeAvaliar = isAprov && f && (f.status === 'enviado' || f.status === 'aprovado');
   $('avalBox').hidden = !podeAvaliar;
   if (podeAvaliar) {
     $('btnAprovar').hidden = f.status !== 'enviado';
@@ -511,7 +514,7 @@ $('btnDevOk').addEventListener('click', async () => {
 // pendências do administrador: períodos enviados (ciclo atual e anterior de cada funcionário)
 let pendencias = [];
 async function atualizarPendencias() {
-  if (!isAdmin) return;
+  if (!isAprov) return;
   try {
     const [cs, us] = await Promise.all([Store.listarConvites(), Store.listarUsuarios()]);
     const ativos = new Set(cs.filter(c => c.ativo).map(c => c.email));
@@ -670,11 +673,12 @@ $('impDir').addEventListener('change', async e => {
 // ======================================================================
 let convites = [], usuarios = [];
 function abrirAdmin() {
-  if (!isAdmin) return;
+  if (!isAprov) return;
   pararOuvir();
   viewUid = me.uid; profile = myProfile;
   $('tabMine').setAttribute('aria-selected', 'false'); $('tabAdmin').setAttribute('aria-selected', 'true');
   $('view-main').hidden = true; $('view-admin').hidden = false; $('roBanner').hidden = true;
+  $('funPanel').hidden = !isMaster; $('expPanel').hidden = !isMaster;
   carregarAdmin();
 }
 async function carregarAdmin() {
@@ -683,7 +687,7 @@ async function carregarAdmin() {
   $('repBody').innerHTML = '<tr><td colspan="7" class="hint">Carregando…</td></tr>';
   try { [convites, usuarios] = await Promise.all([Store.listarConvites(), Store.listarUsuarios()]); }
   catch (e) { $('repBody').innerHTML = '<tr><td colspan="7" class="bad-txt">Não consegui carregar: ' + esc(errMsg(e)) + '</td></tr>'; return; }
-  renderConvites(); atualizarPendencias();
+  if (isMaster) renderConvites(); atualizarPendencias();
   const ativos = new Set(convites.filter(c => c.ativo).map(c => c.email));
   const lista = usuarios.filter(u => ativos.has((u.email || '').toLowerCase())).sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email, 'pt-BR'));
   const linhas = await Promise.all(lista.map(async u => {
@@ -705,35 +709,41 @@ function renderConvites() {
   $('funCount').textContent = convites.filter(c => c.ativo).length + ' com acesso';
   $('convBody').innerHTML = convites.sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email, 'pt-BR')).map(c => {
     const eu = c.email === me.email;
-    return '<tr><td>' + esc(c.nome || '—') + '</td><td>' + esc(c.email) + '</td><td>' + (c.ativo ? '<span class="tag on">Ativo</span>' : '<span class="tag off">Desativado</span>') + (c.admin ? ' <span class="tag adm">Administrador</span>' : '') + (c.trocar_senha ? ' <span class="tag" style="color:var(--amber)">Ainda não trocou a senha</span>' : '') + '</td><td class="r">' +
+    return '<tr><td>' + esc(c.nome || '—') + '</td><td>' + esc(c.email) + '</td><td>' + (c.ativo ? '<span class="tag on">Ativo</span>' : '<span class="tag off">Desativado</span>') + (c.admin ? ' <span class="tag adm">Master</span>' : c.aprovador ? ' <span class="tag apr">Aprovador</span>' : '') + (c.trocar_senha ? ' <span class="tag" style="color:var(--amber)">Ainda não trocou a senha</span>' : '') + '</td><td class="r">' +
       (eu ? '<span class="hint">você</span>' : (c.ativo ? '<button class="link danger" data-cv="off" data-em="' + esc(c.email) + '">Desativar</button>' : '<button class="link" data-cv="on" data-em="' + esc(c.email) + '">Reativar</button>') +
-        (c.admin ? '<button class="link" data-cv="noadm" data-em="' + esc(c.email) + '">Tirar admin</button>' : '<button class="link" data-cv="adm" data-em="' + esc(c.email) + '">Tornar admin</button>') +
+        ' <select class="papel" data-papel="' + esc(c.email) + '" aria-label="Perfil de ' + esc(c.nome || c.email) + '">' + ['funcionario', 'aprovador', 'master'].map(p => '<option value="' + p + '"' + (papelDe(c) === p ? ' selected' : '') + '>' + NOME_PAPEL[p] + '</option>').join('') + '</select> ' +
         (c.conta_admin ? '' : '<button class="link" data-cv="dispensa" data-em="' + esc(c.email) + '" title="Para quem criou a própria senha e não consegue abrir o link de confirmação">Dispensar confirmação</button>')) + '</td></tr>';
   }).join('');
 }
 $('convBody').addEventListener('click', async e => {
   const b = e.target.closest('[data-cv]'); if (!b) return; const c = convites.find(x => x.email === b.dataset.em); if (!c) return;
-  const novo = { nome: c.nome || '', ativo: c.ativo, admin: !!c.admin };
+  const novo = { nome: c.nome || '', ativo: c.ativo, ...flagsDe(papelDe(c)) };
   if (b.dataset.cv === 'dispensa') novo.conta_admin = true;
-  if (b.dataset.cv === 'off') novo.ativo = false; if (b.dataset.cv === 'on') novo.ativo = true; if (b.dataset.cv === 'adm') novo.admin = true; if (b.dataset.cv === 'noadm') novo.admin = false;
+  if (b.dataset.cv === 'off') novo.ativo = false; if (b.dataset.cv === 'on') novo.ativo = true;
   b.disabled = true;
   try { await Store.salvarConvite(c.email, novo); Object.assign(c, novo); renderConvites(); carregarAdmin(); } catch (x) { $('cErr').textContent = errMsg(x); b.disabled = false; }
+});
+$('convBody').addEventListener('change', async e => {
+  const sel = e.target.closest('[data-papel]'); if (!sel) return; const c = convites.find(x => x.email === sel.dataset.papel); if (!c) return;
+  const novo = { nome: c.nome || '', ativo: c.ativo, ...flagsDe(sel.value) }; sel.disabled = true; $('cErr').textContent = '';
+  try { await Store.salvarConvite(c.email, novo); Object.assign(c, novo); renderConvites(); carregarAdmin(); }
+  catch (x) { $('cErr').textContent = 'Não consegui mudar o perfil: ' + errMsg(x); sel.disabled = false; sel.value = papelDe(c); }
 });
 function senhaProvisoria() { const L = 'ABCDEFGHJKLMNPQRSTUVWXYZ', l = 'abcdefghijkmnpqrstuvwxyz', d = '23456789'; const r = s => s[crypto.getRandomValues(new Uint32Array(1))[0] % s.length];
   return r(L) + r(l) + r(l) + r(l) + '-' + r(d) + r(d) + r(d) + r(d) + '-' + r(L) + r(l) + r(l); }
 $('fConv').addEventListener('submit', async e => {
   e.preventDefault(); $('cErr').textContent = ''; $('cRes').hidden = true;
-  const em = $('cEmail').value.trim().toLowerCase(), nome = $('cNome').value.trim(), senha = $('cSenha').value.trim(), adm = $('cAdmin').checked;
+  const em = $('cEmail').value.trim().toLowerCase(), nome = $('cNome').value.trim(), senha = $('cSenha').value.trim(), fl = flagsDe($('cPapel').value);
   if (!/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(em)) { $('cErr').textContent = 'Informe um e-mail válido.'; return; }
   if (senha.length < 8) { $('cErr').textContent = 'A senha provisória precisa ter pelo menos 8 caracteres.'; return; }
   $('btnConv').disabled = true;
   try {
-    await Store.salvarConvite(em, { nome, ativo: true, admin: adm });
+    await Store.salvarConvite(em, { nome, ativo: true, ...fl });
     let criada = true;
     try { await Store.criarContaFuncionario(em, senha); }
     catch (x) { if (x && x.code === 'auth/email-already-in-use') criada = false; else throw x; }
     if (criada) {
-      await Store.salvarConvite(em, { nome, ativo: true, admin: adm, conta_admin: true, trocar_senha: true });
+      await Store.salvarConvite(em, { nome, ativo: true, ...fl, conta_admin: true, trocar_senha: true });
       $('cRes').innerHTML = '<b class="ok-txt">Acesso criado.</b> Passe para ' + esc(nome || em) + ':<br>Site: <code>' + esc(location.origin + location.pathname) + '</code><br>E-mail: <code>' + esc(em) + '</code><br>Senha provisória: <code>' + esc(senha) + '</code><br><span class="hint">No primeiro login ele cria a senha dele.</span>';
     } else {
       $('cRes').innerHTML = '<b>Acesso liberado.</b> Essa pessoa já tinha criado uma senha, então ela entra com a senha dela. Se ela não conseguir confirmar o e-mail, use <b>Dispensar confirmação</b> na lista abaixo.';
