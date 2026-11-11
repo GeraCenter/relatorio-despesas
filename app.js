@@ -1,6 +1,6 @@
 (function () {
 'use strict';
-const APPVER = '2.5.1';
+const APPVER = '2.5.2';
 const $ = id => document.getElementById(id);
 const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MESES_L = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -294,7 +294,22 @@ function renderSheet(it, tot, porCat) {
     '<div class="decl">' + DECL + '</div>' +
     (fech && fech.status === 'aprovado' ? '<div class="decl"><b>Aprovado</b> por ' + esc(fech.avaliado_nome || fech.avaliado_por || '') + ' em ' + quando(fech.avaliado_em) + '.</div>' : '') +
     '<div class="sigs"><div class="sig">' + (esc(p.nome) || '&nbsp;') + '<small>Data ___/___/____</small></div></div>';
+  ajustarFolha();
 }
+// ----- folha A4 na tela: reduz para caber na largura (celular); um toque amplia -----
+let folhaAmpliada = false;
+function ajustarFolha() {
+  const w = $('sheetWrap'), sh = $('sheet'); if (!w || !sh || !w.clientWidth) return;
+  const base = 540, cabe = Math.min(1, w.clientWidth / base), esc2 = folhaAmpliada ? 1 : cabe;
+  sh.style.transform = esc2 < 1 ? 'scale(' + esc2 + ')' : '';
+  w.style.height = Math.ceil(sh.offsetHeight * esc2) + 'px';
+  w.classList.toggle('zoom', folhaAmpliada && cabe < 1);
+  $('zoomHint').hidden = cabe >= 1; $('zoomHint').textContent = folhaAmpliada ? 'Toque na folha para reduzir. Arraste para o lado para ver o resto.' : 'Toque na folha para ampliar.';
+}
+$('sheetWrap').addEventListener('click', () => { folhaAmpliada = !folhaAmpliada; ajustarFolha(); });
+let ultimaLarg = 0;
+if (window.ResizeObserver) new ResizeObserver(() => { const lw = $('sheetWrap').clientWidth; if (lw !== ultimaLarg) { ultimaLarg = lw; ajustarFolha(); } }).observe($('sheetWrap'));
+window.addEventListener('resize', ajustarFolha);
 $('prev').addEventListener('click', () => { curKey = shiftKey(curKey, -1); confirmId = null; if (!$('view-admin').hidden) carregarAdmin(); else { if (!readOnly()) resetForm(); assinar(); } });
 $('next').addEventListener('click', () => { curKey = shiftKey(curKey, 1); confirmId = null; if (!$('view-admin').hidden) carregarAdmin(); else { if (!readOnly()) resetForm(); assinar(); } });
 
